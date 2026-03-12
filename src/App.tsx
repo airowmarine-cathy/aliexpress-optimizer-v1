@@ -76,12 +76,26 @@ const fetchBase64String = async (url: string): Promise<string> => {
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      let proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=webp`;
-      if (attempt === MAX_RETRIES) {
-         proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+      let proxyUrl = '';
+      if (attempt === 1) {
+        // Attempt 1: Vercel Serverless API (Works in Vercel deployment)
+        proxyUrl = `/api/fetch-image?url=${encodeURIComponent(url)}`;
+      } else if (attempt === 2) {
+        // Attempt 2: images.weserv.nl (Fallback for local dev or if API fails)
+        proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=webp`;
+      } else {
+        // Attempt 3: corsproxy.io (Final fallback)
+        proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
       }
+      
       const res = await fetch(proxyUrl, { mode: 'cors' });
       if (!res.ok) throw new Error(`Proxy fetch failed: ${res.status}`);
+      
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        throw new Error('Received HTML instead of image (likely SPA fallback)');
+      }
+      
       const blob = await res.blob();
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -114,6 +128,23 @@ const fetchBase64Obj = async (url: string): Promise<{data: string, mimeType: str
     console.error(e);
   }
   return null;
+};
+
+const getProxiedImageUrl = (url: string) => {
+  if (!url) return '';
+  if (url.startsWith('data:')) return url;
+  if (url.includes('imgbb.com') || url.includes('i.ibb.co') || url.includes('weserv.nl')) return url;
+  
+  // In AI Studio local dev (not Vercel), use weserv directly for UI display to bypass CORS/403
+  // Check for localhost, run.app, or if we are in an iframe (AI Studio preview)
+  const isLocalOrAIStudio = window.location.hostname === 'localhost' || 
+                            window.location.hostname.includes('run.app') ||
+                            window !== window.parent;
+                            
+  if (isLocalOrAIStudio) {
+    return `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=webp`;
+  }
+  return `/api/fetch-image?url=${encodeURIComponent(url)}`;
 };
 
 // --- Types ---
@@ -743,7 +774,7 @@ export default function App() {
                     >
                       {product.image ? (
                         <>
-                          <img src={product.image} alt="" className="max-w-full max-h-full object-contain p-1" referrerPolicy="no-referrer" />
+                          <img src={getProxiedImageUrl(product.image)} alt="" className="max-w-full max-h-full object-contain p-1" referrerPolicy="no-referrer" />
                           {enableImageRemaster && (
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center text-white backdrop-blur-[2px]">
                               <RefreshCw size={18} className="mb-1" />
@@ -1190,7 +1221,7 @@ export default function App() {
                                     return (
                                     <div key={idx} className="flex flex-col gap-1 w-24">
                                       <div className={`relative w-24 h-24 border rounded-xl overflow-hidden shadow-sm group ${img.isRisky ? 'border-red-500' : 'border-slate-200'}`}>
-                                        <img src={img.url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                        <img src={getProxiedImageUrl(img.url)} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                         
                                         {/* Top-left badge for risky images */}
                                         {img.isRisky && (
@@ -1267,7 +1298,7 @@ export default function App() {
                                     className="flex-1 aspect-square border border-gray-100 rounded-[18px] overflow-hidden bg-[#f5f5f7] shadow-sm p-1 cursor-pointer hover:border-indigo-300 transition-colors"
                                     onClick={() => product.image && setLightboxImage(product.image)}
                                   >
-                                    {product.image && <img src={product.image} alt="Original" className="w-full h-full object-contain rounded-2xl" referrerPolicy="no-referrer" />}
+                                    {product.image && <img src={getProxiedImageUrl(product.image)} alt="Original" className="w-full h-full object-contain rounded-2xl" referrerPolicy="no-referrer" />}
                                   </div>
                                   <div className="flex items-center text-gray-300 flex-shrink-0"><ChevronRight size={24} /></div>
                                   <div 
@@ -1275,7 +1306,7 @@ export default function App() {
                                     onClick={() => product.remaster.data && setLightboxImage(product.remaster.data.remasteredUrl)}
                                   >
                                     {product.remaster.data ? (
-                                      <img src={product.remaster.data.remasteredUrl} alt="Remastered" className="w-full h-full object-contain rounded-2xl" />
+                                      <img src={getProxiedImageUrl(product.remaster.data.remasteredUrl)} alt="Remastered" className="w-full h-full object-contain rounded-2xl" />
                                     ) : (
                                       <div className="w-full h-full flex flex-col items-center justify-center text-indigo-300 gap-2">
                                         {product.remaster.status === 'error' ? (
@@ -1362,7 +1393,7 @@ export default function App() {
                           ${isSelected ? 'border-indigo-500 ring-4 ring-indigo-500/20 shadow-md' : 'border-transparent shadow-sm hover:shadow-md hover:scale-[1.02]'}
                         `}
                       >
-                        <img src={img} alt={`Option ${idx + 1}`} className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
+                        <img src={getProxiedImageUrl(img)} alt={`Option ${idx + 1}`} className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
                         {isSelected && (
                           <div className="absolute top-2 right-2 bg-indigo-500 text-white rounded-full p-1 shadow-sm">
                             <Check size={14} strokeWidth={3} />
@@ -1385,7 +1416,7 @@ export default function App() {
           onClick={() => setLightboxImage(null)}
         >
           <img 
-            src={lightboxImage} 
+            src={getProxiedImageUrl(lightboxImage)} 
             alt="Enlarged view" 
             className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
             referrerPolicy="no-referrer"

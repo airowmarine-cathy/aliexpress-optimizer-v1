@@ -110,7 +110,7 @@ export async function analyzeVisuals(
   descriptionHtml: string,
   fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>
 ): Promise<VisualAnalysis> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('未找到 API Key');
   const ai = new GoogleGenAI({ apiKey });
 
@@ -125,7 +125,7 @@ export async function analyzeVisuals(
   const mainImgData = await fetchBase64(productImage);
   
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-3-flash-preview",
     contents: [
       { text: analysisPrompt + `\n\nHTML Content:\n${descriptionHtml}` },
       ...(mainImgData ? [{ inlineData: { data: mainImgData.data, mimeType: mainImgData.mimeType } }] : [])

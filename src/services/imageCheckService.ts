@@ -41,7 +41,7 @@ export async function checkImageRisk(
   imageUrl: string, 
   fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>
 ): Promise<ImageCheckResult> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('未找到 API Key');
   
   try {
@@ -82,7 +82,7 @@ export async function checkImageRisk(
     `;
 
     const result = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
+      model: "gemini-3-flash-preview",
       contents: { parts: [{ text: prompt }, { inlineData: { data: base64Data.data, mimeType: base64Data.mimeType } }] }
     });
 

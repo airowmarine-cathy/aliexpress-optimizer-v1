@@ -59,9 +59,9 @@ export const SEO_RESPONSE_SCHEMA = {
 };
 
 export async function optimizeTitle(factSheet: FactSheet, originalTitle: string): Promise<SEOData> {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-3-flash-preview",
     contents: `Original Title: ${originalTitle}\n\nFact Sheet: ${JSON.stringify(factSheet)}`,
     config: {
       systemInstruction: SEO_PROMPT_SYSTEM,

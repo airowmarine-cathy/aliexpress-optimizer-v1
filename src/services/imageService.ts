@@ -22,7 +22,7 @@ export async function detectImageCategory(
   imageUrl: string,
   fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>
 ): Promise<string> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) return 'General';
   
   try {
@@ -63,7 +63,7 @@ export async function remasterImageV1_Scene(
   fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>,
   factSheet?: any // Optional FactSheet for context
 ): Promise<RemasteredImage> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('未找到 API Key');
   const ai = new GoogleGenAI({ apiKey });
 
@@ -176,7 +176,7 @@ export async function remasterImage(
   fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>,
   factSheet?: any
 ): Promise<RemasteredImage> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('未找到 API Key');
   const ai = new GoogleGenAI({ apiKey });
 
