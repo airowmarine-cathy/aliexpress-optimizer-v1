@@ -73,7 +73,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
 
 const fetchBase64String = async (url: string): Promise<string> => {
   if (!url) throw new Error('Empty URL');
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 4;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       let proxyUrl = '';
@@ -81,10 +81,13 @@ const fetchBase64String = async (url: string): Promise<string> => {
         // Attempt 1: Vercel Serverless API (Works in Vercel deployment)
         proxyUrl = `/api/fetch-image?url=${encodeURIComponent(url)}`;
       } else if (attempt === 2) {
-        // Attempt 2: images.weserv.nl (Fallback for local dev or if API fails)
+        // Attempt 2: allorigins.win (High success rate for CORS)
+        proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      } else if (attempt === 3) {
+        // Attempt 3: images.weserv.nl (Fallback for local dev or if API fails)
         proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=webp`;
       } else {
-        // Attempt 3: corsproxy.io (Final fallback)
+        // Attempt 4: corsproxy.io (Final fallback)
         proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
       }
       
@@ -133,18 +136,10 @@ const fetchBase64Obj = async (url: string): Promise<{data: string, mimeType: str
 const getProxiedImageUrl = (url: string) => {
   if (!url) return '';
   if (url.startsWith('data:')) return url;
-  if (url.includes('imgbb.com') || url.includes('i.ibb.co') || url.includes('weserv.nl')) return url;
   
-  // In AI Studio local dev (not Vercel), use weserv directly for UI display to bypass CORS/403
-  // Check for localhost, run.app, or if we are in an iframe (AI Studio preview)
-  const isLocalOrAIStudio = window.location.hostname === 'localhost' || 
-                            window.location.hostname.includes('run.app') ||
-                            window !== window.parent;
-                            
-  if (isLocalOrAIStudio) {
-    return `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=webp`;
-  }
-  return `/api/fetch-image?url=${encodeURIComponent(url)}`;
+  // 纯前端展示（<img> 标签配合 referrerPolicy="no-referrer"）不需要代理，直接返回原图即可。
+  // 这样可以彻底避免因为代理失效导致的前端图片裂开问题。
+  return url;
 };
 
 // --- Types ---

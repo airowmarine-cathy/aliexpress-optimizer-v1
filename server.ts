@@ -13,6 +13,34 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Vercel-compatible Image Proxy Route (GET)
+  app.get("/api/fetch-image", async (req, res) => {
+    const url = req.query.url as string;
+    if (!url) {
+      return res.status(400).send("Missing url parameter");
+    }
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        }
+      });
+      if (!response.ok) throw new Error(`Failed to fetch: ${response.statusText}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Fetch image error:", error);
+      res.status(500).send(`Error fetching image: ${error.message}`);
+    }
+  });
+
   // Image Proxy Route
   app.post("/api/proxy-image", async (req, res) => {
     const { url } = req.body;
