@@ -71,8 +71,40 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   throw new Error('Unreachable');
 }
 
+const fetchBase64ViaCanvas = (url: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Failed to get canvas context');
+        ctx.drawImage(img, 0, 0);
+        const dataURL = canvas.toDataURL('image/jpeg', 0.9);
+        resolve(dataURL);
+      } catch (e) {
+        reject(new Error('Canvas taint error: ' + (e as Error).message));
+      }
+    };
+    img.onerror = () => reject(new Error('Failed to load image into canvas'));
+    img.src = url;
+  });
+};
+
 const fetchBase64String = async (url: string): Promise<string> => {
   if (!url) throw new Error('Empty URL');
+
+  // 尝试 0: 纯前端 Canvas 提取 (利用用户真实 IP 绕过服务器防盗链)
+  try {
+    const base64 = await fetchBase64ViaCanvas(url);
+    return base64;
+  } catch (canvasError) {
+    console.warn(`[Image Fetch] Canvas extraction failed, falling back to proxies:`, canvasError);
+  }
+
   const MAX_RETRIES = 4;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
