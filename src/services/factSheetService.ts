@@ -71,7 +71,7 @@ export const FACT_SHEET_SCHEMA = {
 };
 
 export async function extractFactSheet(title: string, customAttributes: any, descriptionHtml: string): Promise<FactSheet> {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
   
   // Deep Parsing: We keep more HTML structure for Pro model to analyze
   const prepareContent = (html: string) => {

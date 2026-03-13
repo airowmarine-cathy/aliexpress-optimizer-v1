@@ -110,7 +110,7 @@ export async function analyzeVisuals(
   descriptionHtml: string,
   fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>
 ): Promise<VisualAnalysis> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('未找到 API Key');
   const ai = new GoogleGenAI({ apiKey });
 

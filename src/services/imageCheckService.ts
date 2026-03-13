@@ -39,9 +39,10 @@ export function removeImageFromHtml(html: string, imageUrl: string): string {
 // Check a single image for risk using Gemini Vision
 export async function checkImageRisk(
   imageUrl: string, 
-  fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>
+  fetchBase64: (url: string) => Promise<{data: string, mimeType: string} | null>,
+  context?: { productName?: string, compatibility?: string[], removeSupplierInfo?: boolean }
 ): Promise<ImageCheckResult> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('未找到 API Key');
   
   try {
@@ -54,30 +55,44 @@ export async function checkImageRisk(
 
     const ai = new GoogleGenAI({ apiKey });
     
+    const productName = context?.productName || '未知产品';
+    const compatibility = context?.compatibility?.join(', ') || '无';
+    const removeSupplierInfo = context?.removeSupplierInfo || false;
+
     const prompt = `
-      Role: Expert E-commerce Compliance Officer.
-      Task: rigorous image audit for prohibited contact information.
+      Role: 资深跨境电商内容审核专家。
+      Task: 准确识别并标记出旨在“站外引流”或“私下交易”的名片式图片，同时避免误杀正常的产品展示图。
 
-      STEP 1: OCR & VISUAL SCAN
-      - Scan the image for ANY text (English, Chinese, numbers, URLs).
-      - Look for QR codes (WeChat, WhatsApp, Line, etc.).
-      - Look for watermarks or logos with text.
+      [产品上下文]
+      - 产品名称: ${productName}
+      - 适用/兼容品牌: ${compatibility}
 
-      STEP 2: RISK ANALYSIS
-      Check if the extracted text or visual elements contain:
-      1. Phone numbers (e.g., +86..., 138...)
-      2. Email addresses
-      3. URLs / Website links
-      4. Instant Messaging IDs (WhatsApp, WeChat, Skype, Line, etc.)
-      5. QR Codes (ZERO TOLERANCE - ALWAYS RISKY)
-      6. "Contact Us" or business card style text (ZERO TOLERANCE - ALWAYS RISKY)
-      7. Competitor Brand Logos or Trademarks (e.g., Nike, Apple, Samsung)
-      8. Text-heavy contact information screenshots (ZERO TOLERANCE - ALWAYS RISKY)
+      [审核逻辑与标准]
+      请仔细观察图片，并按照以下步骤进行推理：
+
+      第一步：判断图片类型 (Image Type)
+      - 类型 A (名片/引流海报)：图片的主体是大量的文字、联系方式、公司简介。排版类似于名片、售后卡、或者纯粹的广告海报。
+      - 类型 B (产品展示图)：图片的主体是产品本身。任何文字、Logo 或二维码都是物理附着在产品机身、标签或包装盒上的。
+      ${removeSupplierInfo ? '- 类型 C (供应商/工厂展示)：图片主体是工厂大楼、生产车间、办公室、团队合照、营业执照或“关于我们”介绍。' : ''}
+
+      第二步：执行判定规则
+      - 如果是【类型 A】：
+        - 重点打击“私下交易”：如果图片包含 电话、WhatsApp、WeChat、Email、二维码 中的【多项组合】，或者伴随“Contact us”等强引导文案，判定为违规 (isRisky: true)。
+        - 豁免规则：如果仅仅是包含认证证书的网址（如 ISO、BSCI、TUV）或简单的品牌域名水印（无引导性文案），属于正常信息展示，【不违规】 (isRisky: false)。
+
+      - 如果是【类型 B】：
+        - 允许产品机身或包装上自带的二维码（通常是防伪或说明书）。
+        - 允许出现【适用/兼容品牌】的 Logo。
+        - 只有当图片上被后期人为添加了明显的引流文字（如大字体的“Contact us: +86...”）时，才判定为违规。否则，判定为安全 (isRisky: false)。
+
+      ${removeSupplierInfo ? '- 如果是【类型 C】：\n        - 判定为违规 (isRisky: true)。\n        - 理由：用户开启了“移除供应商信息”功能，此类图片属于公司/团队展示。' : ''}
 
       OUTPUT FORMAT (JSON ONLY):
       {
+        "imageType": "A" or "B" ${removeSupplierInfo ? 'or "C"' : ''},
+        "reasoning": "简短解释你的判断过程，例如：这是一张名片，包含大量联系方式 / 这是产品实拍图，二维码是机身上的警告标签",
         "isRisky": boolean,
-        "reason": "发现 [手机号: 138xxxx] / [二维码] / [竞品Logo]" (必须用中文输出具体违规原因，如果没有违规填 null)
+        "reason": "如果违规，用中文简述原因（如：名片式引流图片 / 包含竞品Logo）。如果不违规，填 null"
       }
     `;
 

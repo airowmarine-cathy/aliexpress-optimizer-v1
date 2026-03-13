@@ -126,12 +126,24 @@ async function cleanSingleField(
   fieldName: string, 
   content: string, 
   placeholders: Map<string, string>,
-  factSheet: FactSheet
+  factSheet: FactSheet,
+  options?: { removeSupplierInfo?: boolean, removeFAQ?: boolean, originalTitle?: string }
 ): Promise<{ cleaned: string, changes: string[] }> {
   if (!content || !content.trim()) return { cleaned: '', changes: [] };
 
   const MAX_RETRIES = 2;
   let lastError;
+
+  let dynamicInstructions = "";
+  if (options?.removeSupplierInfo) {
+    dynamicInstructions += "\n- CRITICAL: The user requested to REMOVE SUPPLIER INFO. You MUST identify and completely remove any sections related to 'About Us', 'Company Profile', 'Who we are', 'Factory Show', or any company introduction text/images. Log this as '[Company Info] Removed ...'.";
+  }
+  if (options?.removeFAQ) {
+    dynamicInstructions += "\n- CRITICAL: The user requested to REMOVE FAQ. You MUST identify and completely remove any sections related to 'FAQ', 'Frequently Asked Questions', 'Q&A', or any list of questions and answers. Log this as '[FAQ] Removed ...'.";
+  }
+  if (options?.originalTitle) {
+    dynamicInstructions += `\n- CRITICAL: You MUST identify and completely remove the original product title if it appears in the description text (especially at the top). Original Title to remove: "${options.originalTitle}". Also remove any existing bullet points that look like product highlights at the top. Log this as '[Title/Highlights] Removed original title/bullet points'.`;
+  }
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -142,6 +154,9 @@ async function cleanSingleField(
             
             Fact Sheet Data:
             ${JSON.stringify(factSheet, null, 2)}
+
+            Dynamic Instructions:
+            ${dynamicInstructions}
 
             Content:
             ${content}
@@ -191,9 +206,10 @@ export async function cleanDescriptions(
   pc2: string, 
   mobile1: string, 
   mobile2: string,
-  factSheet: FactSheet
+  factSheet: FactSheet,
+  options?: { removeSupplierInfo?: boolean, removeFAQ?: boolean, originalTitle?: string }
 ): Promise<CleanedDescriptions> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('未找到 API Key');
   const ai = new GoogleGenAI({ apiKey });
 
@@ -221,10 +237,10 @@ export async function cleanDescriptions(
     // Gemini Flash has high rate limits, so parallel should be fine.
     
     const [resPc1, resPc2, resMobile1, resMobile2] = await Promise.all([
-      cleanSingleField(ai, 'PC Description 1', sPc1, pPc1, factSheet),
-      cleanSingleField(ai, 'PC Description 2', sPc2, pPc2, factSheet),
-      cleanSingleField(ai, 'Mobile Description 1', sMobile1, pMobile1, factSheet),
-      cleanSingleField(ai, 'Mobile Description 2', sMobile2, pMobile2, factSheet)
+      cleanSingleField(ai, 'PC Description 1', sPc1, pPc1, factSheet, options),
+      cleanSingleField(ai, 'PC Description 2', sPc2, pPc2, factSheet, options),
+      cleanSingleField(ai, 'Mobile Description 1', sMobile1, pMobile1, factSheet, options),
+      cleanSingleField(ai, 'Mobile Description 2', sMobile2, pMobile2, factSheet, options)
     ]);
 
     // 3. Aggregate results

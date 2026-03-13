@@ -12,6 +12,27 @@ import { type ProductImageCheckReport, extractImagesFromHtml, checkImageRisk } f
 
 // --- Utility Functions ---
 
+export function generateFinalHtml(baseHtml: string, title?: string, marketingData?: MarketingData): string {
+  if (!baseHtml) return '';
+  
+  let injectedHtml = '<div class="ali-description-container" style="font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto;">';
+  
+  if (title) {
+    injectedHtml += `\n  <h1 style="font-size: 24px; font-weight: bold; color: #333; margin-bottom: 20px; text-align: center; line-height: 1.4;">${title}</h1>`;
+  }
+  
+  if (marketingData && marketingData.points && marketingData.points.length > 0) {
+    injectedHtml += `\n  <ul style="font-size: 16px; color: #666; line-height: 1.6; margin-bottom: 30px; padding-left: 20px;">`;
+    marketingData.points.forEach(point => {
+      injectedHtml += `\n    <li style="margin-bottom: 10px;"><strong>${point.header}</strong>: ${point.content}</li>`;
+    });
+    injectedHtml += `\n  </ul>`;
+  }
+  
+  injectedHtml += `\n  <div class="description-body">\n${baseHtml}\n  </div>\n</div>`;
+  return injectedHtml;
+}
+
 export async function uploadToImgBB(base64Data: string): Promise<string> {
   const apiKey = 'a78bf9a83e8ae661160b69a867b6cc6b';
   
@@ -216,6 +237,10 @@ export default function App() {
   const [newAttrValue, setNewAttrValue] = useState('');
   const [addingAttrId, setAddingAttrId] = useState<string | null>(null);
   const [editingComplianceId, setEditingComplianceId] = useState<string | null>(null);
+  
+  // Cleaning Preferences
+  const [removeSupplierInfo, setRemoveSupplierInfo] = useState(false);
+  const [removeFAQ, setRemoveFAQ] = useState(false);
   
   // Upload State
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
@@ -454,7 +479,12 @@ export default function App() {
         product.rawRow['产品详细描述2'] || product.rawRow['产品描述2'] || '',
         product.rawRow['移动端描述1'] || product.rawRow['移动端详细描述1'] || '',
         product.rawRow['移动端描述2'] || product.rawRow['移动端详细描述2'] || '',
-        factSheetData
+        factSheetData,
+        {
+          removeSupplierInfo,
+          removeFAQ,
+          originalTitle: product.rawRow['产品标题'] || product.rawRow['标题'] || product.name
+        }
       ));
       originalDescData = JSON.parse(JSON.stringify(descData));
       updateProduct(product.id, { description: { status: 'success', data: descData, originalData: originalDescData } });
@@ -481,7 +511,11 @@ export default function App() {
         const chunk = uniqueImages.slice(i, i + 3);
         const results = await Promise.all(chunk.map(async (imgUrl) => {
           try {
-            return await checkImageRisk(imgUrl, fetchBase64Obj);
+            return await checkImageRisk(imgUrl, fetchBase64Obj, {
+              productName: product.name,
+              compatibility: factSheetData?.compatibility,
+              removeSupplierInfo
+            });
           } catch (e) {
             return { url: imgUrl, isRisky: false, reason: '检测失败' };
           }
@@ -617,10 +651,13 @@ export default function App() {
         const mobile1Col = '移动端描述1' in row ? '移动端描述1' : '移动端详细描述1' in row ? '移动端详细描述1' : '移动端描述1';
         const mobile2Col = '移动端描述2' in row ? '移动端描述2' : '移动端详细描述2' in row ? '移动端详细描述2' : '移动端描述2';
         
-        row[pc1Col] = p.description.data.pc1;
-        row[pc2Col] = p.description.data.pc2;
-        row[mobile1Col] = p.description.data.mobile1;
-        row[mobile2Col] = p.description.data.mobile2;
+        const title = p.seo.data?.optimized_title || p.name;
+        const marketingData = p.marketing.data;
+
+        row[pc1Col] = generateFinalHtml(p.description.data.pc1, title, marketingData);
+        row[pc2Col] = generateFinalHtml(p.description.data.pc2, title, marketingData);
+        row[mobile1Col] = generateFinalHtml(p.description.data.mobile1, title, marketingData);
+        row[mobile2Col] = generateFinalHtml(p.description.data.mobile2, title, marketingData);
       }
       if (p.marketing.data) {
         const matrixStr = `风格矩阵: ${p.marketing.data.category_matrix}`;
@@ -777,6 +814,57 @@ export default function App() {
                     }`}
                   />
                 </button>
+              </div>
+
+              {/* Cleaning Preferences */}
+              <div className="mt-8 text-left border-t border-gray-100 pt-8">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-indigo-500" />
+                  清洗偏好设置 (Cleaning Preferences)
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50/50 border border-gray-100">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">移除供应商/工厂信息</div>
+                      <div className="text-xs text-gray-500 mt-0.5">自动识别并删除图片和描述中的公司介绍、团队合照等</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={uploadStatus === 'uploading'}
+                      onClick={() => setRemoveSupplierInfo(!removeSupplierInfo)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                        removeSupplierInfo ? 'bg-indigo-600' : 'bg-slate-200'
+                      } ${uploadStatus === 'uploading' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          removeSupplierInfo ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50/50 border border-gray-100">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">移除 FAQ 问答</div>
+                      <div className="text-xs text-gray-500 mt-0.5">自动识别并删除描述中的常见问题解答版块</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={uploadStatus === 'uploading'}
+                      onClick={() => setRemoveFAQ(!removeFAQ)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                        removeFAQ ? 'bg-indigo-600' : 'bg-slate-200'
+                      } ${uploadStatus === 'uploading' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          removeFAQ ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1143,7 +1231,13 @@ export default function App() {
                                   <div 
                                     className="origin-top-left prose prose-sm max-w-none p-6" 
                                     style={{ zoom: 0.7 }}
-                                    dangerouslySetInnerHTML={{ __html: product.description.data.pc1 }} 
+                                    dangerouslySetInnerHTML={{ 
+                                      __html: generateFinalHtml(
+                                        product.description.data.pc1, 
+                                        product.seo.data?.optimized_title || product.name, 
+                                        product.marketing.data
+                                      ) 
+                                    }} 
                                   />
                                 ) : (
                                   <div className="p-4 text-slate-400 italic text-sm">等待生成...</div>

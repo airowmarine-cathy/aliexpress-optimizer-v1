@@ -40,9 +40,15 @@ STRICT 5-STEP PROCESS:
      * DO NOT remove brand/model names if they have suffixes like "style", "model", "type", "custom" (e.g., "JP style").
      * DO NOT remove third-party component brands (e.g., "Schaller tuner", "Alpha control").
 
-4. TRANSLATION & STANDARDIZATION:
+4. TRANSLATION, STANDARDIZATION & FORMATTING:
    - Translate ALL non-English characters to standard E-commerce English.
-   - Format: Title Case for Keys (e.g., "Material"), Sentence Case for Values.
+   - STRICTLY NO FULL-WIDTH CHARACTERS (全角字符). Replace all full-width punctuation (e.g., ，、：（）) with standard half-width English punctuation (e.g., , : ( )). Ensure a space after commas.
+   - Format: Use Title Case for BOTH Keys and Values. Capitalize the first letter of each word, but keep common prepositions, conjunctions, and articles (e.g., of, in, and, with, for, the, a) lowercase.
+   - Length Limit: Each attribute value MUST NOT exceed 70 characters. If a value is too long, DO NOT hard truncate. Instead, intelligently summarize and extract the core keywords to keep it under 70 characters while maintaining semantic completeness.
+   - Dual-Dimension Units: For any dimensions or weights, automatically calculate and display both metric and imperial units in a consistent bracket format.
+     * Length/Size: e.g., "50 cm (19.7 inches)" or "2 m (6.6 ft)".
+     * Weight: e.g., "5 kg (11 lbs)" or "500 g (17.6 oz)".
+     * Intelligently choose the most appropriate unit scale (cm vs m, g vs kg).
 
 5. FACT CHECK:
    - Do NOT invent attributes not present in Original Attributes or Fact Sheet.
@@ -50,7 +56,7 @@ STRICT 5-STEP PROCESS:
 OUTPUT FORMAT:
 - Return a single string of key-value pairs separated by newlines (\n).
 - DO NOT add a space after the colon.
-- Example: "Material:Oxford Cloth\nColor:Black\nFeature:Waterproof"
+- Example: "Material:Oxford Cloth\nColor:Black\nSize:50 cm (19.7 inches)"
 `;
 
 export const ATTRIBUTE_SCHEMA = {
@@ -70,7 +76,7 @@ export const ATTRIBUTE_SCHEMA = {
 };
 
 export async function optimizeAttributes(originalAttributes: string, factSheet: FactSheet): Promise<{optimized: string, changes: string[]}> {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
