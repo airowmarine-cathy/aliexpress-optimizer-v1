@@ -88,7 +88,7 @@ export async function extractFactSheet(title: string, customAttributes: any, des
   const attributesStr = typeof customAttributes === 'string' ? customAttributes : JSON.stringify(customAttributes, null, 2);
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-3-flash-preview",
     contents: [
       { 
         text: `你是一个专业的产品数据专家。请从以下三个维度深度解析并提取产品事实清单（Fact Sheet）：
