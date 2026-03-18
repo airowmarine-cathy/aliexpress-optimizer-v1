@@ -123,9 +123,16 @@ const fetchBase64ViaCanvas = (url: string): Promise<string> => {
 const fetchBase64String = async (url: string): Promise<string> => {
   if (!url) throw new Error('Empty URL');
 
+  let absoluteUrl = url;
+  if (absoluteUrl.startsWith('//')) {
+    absoluteUrl = 'https:' + absoluteUrl;
+  } else if (!absoluteUrl.startsWith('http')) {
+    absoluteUrl = 'https://' + absoluteUrl;
+  }
+
   // 尝试 0: 纯前端 Canvas 提取 (利用用户真实 IP 绕过服务器防盗链)
   try {
-    const base64 = await fetchBase64ViaCanvas(url);
+    const base64 = await fetchBase64ViaCanvas(absoluteUrl);
     return base64;
   } catch (canvasError) {
     console.warn(`[Image Fetch] Canvas extraction failed, falling back to proxies:`, canvasError);
@@ -137,16 +144,16 @@ const fetchBase64String = async (url: string): Promise<string> => {
       let proxyUrl = '';
       if (attempt === 1) {
         // Attempt 1: Vercel Serverless API (Works in Vercel deployment)
-        proxyUrl = `/api/fetch-image?url=${encodeURIComponent(url)}`;
+        proxyUrl = `/api/fetch-image?url=${encodeURIComponent(absoluteUrl)}`;
       } else if (attempt === 2) {
         // Attempt 2: allorigins.win (High success rate for CORS)
-        proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(absoluteUrl)}`;
       } else if (attempt === 3) {
         // Attempt 3: images.weserv.nl (Fallback for local dev or if API fails)
-        proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=webp`;
+        proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(absoluteUrl)}&output=webp`;
       } else {
         // Attempt 4: corsproxy.io (Final fallback)
-        proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        proxyUrl = `https://corsproxy.io/?${encodeURIComponent(absoluteUrl)}`;
       }
       
       const res = await fetch(proxyUrl, { mode: 'cors' });
@@ -195,9 +202,16 @@ const getProxiedImageUrl = (url: string) => {
   if (!url) return '';
   if (url.startsWith('data:')) return url;
   
+  let absoluteUrl = url;
+  if (absoluteUrl.startsWith('//')) {
+    absoluteUrl = 'https:' + absoluteUrl;
+  } else if (!absoluteUrl.startsWith('http')) {
+    absoluteUrl = 'https://' + absoluteUrl;
+  }
+  
   // 纯前端展示（<img> 标签配合 referrerPolicy="no-referrer"）不需要代理，直接返回原图即可。
-  // 这样可以彻底避免因为代理失效导致的前端图片裂开问题。
-  return url;
+  // 这样可以彻底避免因为代理失效导致的前端图片裂开问题，同时兼容 AI Studio 和 Vercel。
+  return absoluteUrl;
 };
 
 // --- Types ---

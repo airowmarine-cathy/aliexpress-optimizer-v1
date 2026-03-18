@@ -77,12 +77,23 @@ export async function extractFactSheet(title: string, customAttributes: any, des
   // Deep Parsing: We keep more HTML structure for Pro model to analyze
   const prepareContent = (html: string) => {
     if (!html) return "No description available.";
-    // Remove scripts and styles but keep tables and lists structure
+    // Remove scripts, styles, and other non-content tags
     let cleaned = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+                      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                      .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, '')
+                      .replace(/<img[^>]*>/gi, '')
+                      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
     
-    // If too long, we take the first 8000 chars for Pro model
-    return cleaned.slice(0, 8000);
+    // Strip all HTML tags except for structural ones like tables and lists
+    // This helps the Flash model focus on the data without getting confused by complex DOM trees
+    cleaned = cleaned.replace(/<\/?(?!(table|tr|td|th|tbody|thead|ul|ol|li|p|br)\b)[^>]+>/gi, ' ');
+    
+    // Normalize whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    // Return the fully cleaned description without arbitrary truncation
+    // to ensure no product information is lost.
+    return cleaned;
   };
 
   const richDescription = prepareContent(descriptionHtml);
