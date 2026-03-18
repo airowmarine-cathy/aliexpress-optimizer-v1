@@ -20,7 +20,8 @@ DATA SOURCE HIERARCHY:
 3. REFERENCE: Original Title. Use this to identify core keywords.
 
 EXTRACTION RULES:
-- EXTRACT: Material, Dimensions/Size, Technical Specifications (Power, Capacity, Interface, etc.), and Certifications (CE, RoHS, FDA, etc.).
+- EXTRACT: Material, Dimensions/Size, Technical Specifications (Power, Capacity, Interface, etc.), and Certifications (CE, RoHS, etc.).
+- CRITICAL COMPLIANCE: You MUST completely IGNORE and EXCLUDE any mentions of "FDA", "FDA Approved", "FDA Certified", "FDA Cleared", "FDA Registered", or any FDA-related claims. Do not extract them into certifications or anywhere else.
 - EXCLUDE: Seller's own Brand Names, Model Numbers, Warranty information, and Marketing Fluff.
 - CRITICAL EXCEPTION FOR PARTS/ACCESSORIES: You MUST EXTRACT and RETAIN any compatible brands or models the product fits (e.g., "for Toyota", "fit for BMW", "compatible with iPhone 15"). Store this in the "compatibility" field.
 - STANDARDIZATION: All output MUST be in standard E-commerce English. Translate if necessary.

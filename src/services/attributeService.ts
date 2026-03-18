@@ -34,6 +34,7 @@ STRICT 5-STEP PROCESS:
      * Shipping / Delivery Time / Freight
      * Payment Methods
      * Contact info (Email, Phone, WhatsApp, WeChat, Skype, URLs, or generic customer service invitations like "welcome contact with me")
+     * Any claims related to "FDA" (e.g., "FDA Approved", "Certification: FDA", "FDA Cleared", "FDA Registered")
    - COMPATIBILITY & COMPONENT EXEMPTION (CRITICAL): 
      * DO NOT remove brand/model names if they appear in the Fact Sheet's 'compatibility' or 'brand' fields.
      * DO NOT remove brand/model names if they follow prepositions like "for", "fit", "compatible with" (e.g., "for Toyota").

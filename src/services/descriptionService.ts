@@ -135,6 +135,7 @@ async function cleanSingleField(
   let lastError;
 
   let dynamicInstructions = "";
+  dynamicInstructions += "\n- CRITICAL COMPLIANCE: You MUST identify and completely remove any text related to 'FDA', 'FDA Approved', 'FDA Certified', 'FDA Cleared', 'FDA Registered', or any FDA-related claims. Log this as '[FDA] Removed FDA claims'.";
   if (options?.removeSupplierInfo) {
     dynamicInstructions += "\n- CRITICAL: The user requested to REMOVE SUPPLIER INFO. You MUST identify and completely remove any sections related to 'About Us', 'Company Profile', 'Who we are', 'Factory Show', or any company introduction text/images. Log this as '[Company Info] Removed ...'.";
   }

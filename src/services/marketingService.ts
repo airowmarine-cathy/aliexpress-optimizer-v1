@@ -33,6 +33,7 @@ STYLE MATRIX ROUTING:
 - Outdoor: Energetic, durable. Focus on performance in extreme environments.
 
 STRICT RULES:
+- FDA BAN: You MUST NOT include "FDA", "FDA Approved", "FDA Certified", "FDA Cleared", "FDA Registered", or any FDA-related claims in the marketing points.
 - FORMULA: [Bold Header]: [Verb/Adjective starting description].
 - NUMBERS: Must include specific numbers or percentages where available.
 - INVISIBLE ENDORSEMENT: Embed certifications (CE, RoHS, etc.) as adjectives within points. Do not create standalone points for them.

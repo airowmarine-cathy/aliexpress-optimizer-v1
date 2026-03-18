@@ -83,10 +83,15 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   while (attempt < maxRetries) {
     try {
       return await fn();
-    } catch (error) {
+    } catch (error: any) {
       attempt++;
       if (attempt >= maxRetries) throw error;
-      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+      
+      // If it's a 429 error, wait longer
+      const isRateLimit = error?.message?.includes('429') || error?.status === 429;
+      const baseDelay = isRateLimit ? 2000 : 1000;
+      
+      await new Promise(resolve => setTimeout(resolve, baseDelay * Math.pow(2, attempt - 1)));
     }
   }
   throw new Error('Unreachable');
@@ -409,6 +414,35 @@ export default function App() {
       updateProduct(product.id, { remaster: { status: 'success', data: { ...remasterData, imgbbUrl } } });
     } catch (error: any) {
       updateProduct(product.id, { remaster: { status: 'error', error: error.message } });
+    }
+  };
+
+  const handleRetryProduct = async (product: ProductPipeline) => {
+    // Reset product status to idle and clear previous errors
+    updateProduct(product.id, { 
+      overallStatus: 'idle',
+      factSheet: { status: 'idle' },
+      seo: { status: 'idle' },
+      marketing: { status: 'idle' },
+      attributes: { status: 'idle' },
+      description: { status: 'idle' },
+      compliance: { status: 'idle' },
+      remaster: { status: 'idle' }
+    });
+    
+    // If the queue is already running, it will automatically pick it up.
+    // If not, we process it directly.
+    if (!isQueueRunning) {
+      // Find the updated product to pass to processProduct
+      const updatedProduct = products.find(p => p.id === product.id);
+      if (updatedProduct) {
+        // We need to set isQueueRunningRef to true temporarily for this single run
+        // so that the internal checks in processProduct don't abort early.
+        const wasRunning = isQueueRunningRef.current;
+        isQueueRunningRef.current = true;
+        await processProduct(updatedProduct);
+        isQueueRunningRef.current = wasRunning;
+      }
     }
   };
 
@@ -905,7 +939,18 @@ export default function App() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{product.id}</span>
                         {product.overallStatus === 'completed' && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">已完成</span>}
-                        {product.overallStatus === 'failed' && <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">失败</span>}
+                        {product.overallStatus === 'failed' && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">失败</span>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); handleRetryProduct(product); }}
+                              className="flex items-center gap-1 text-[10px] font-medium text-slate-600 bg-white/80 backdrop-blur-md border border-slate-200/60 shadow-sm hover:shadow hover:bg-slate-50 hover:text-indigo-600 px-2 py-0.5 rounded-full transition-all duration-200"
+                            >
+                              <RefreshCw size={10} />
+                              重试
+                            </button>
+                          </div>
+                        )}
                         {product.overallStatus === 'processing' && <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-1"><Loader2 size={10} className="animate-spin"/> 处理中</span>}
                       </div>
                       <h3 className="text-sm font-medium text-slate-800 truncate">{product.name}</h3>

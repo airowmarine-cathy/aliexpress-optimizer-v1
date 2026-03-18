@@ -85,6 +85,8 @@ export async function checkImageRisk(
         - 允许出现【适用/兼容品牌】的 Logo。
         - 只有当图片上被后期人为添加了明显的引流文字（如大字体的“Contact us: +86...”）时，才判定为违规。否则，判定为安全 (isRisky: false)。
 
+      - 无论哪种类型，【FDA 违规红线】：如果图片中包含 FDA 的 Logo，或者包含 "FDA Approved", "FDA Certified", "FDA Cleared", "FDA Registered" 等任何 FDA 相关的宣称字眼，一律判定为违规 (isRisky: true)。
+
       ${removeSupplierInfo ? '- 如果是【类型 C】：\n        - 判定为违规 (isRisky: true)。\n        - 理由：用户开启了“移除供应商信息”功能，此类图片属于公司/团队展示。' : ''}
 
       OUTPUT FORMAT (JSON ONLY):
