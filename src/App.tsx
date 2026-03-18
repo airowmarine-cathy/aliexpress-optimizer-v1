@@ -430,23 +430,12 @@ export default function App() {
       remaster: { status: 'idle' }
     });
     
-    // If the queue is already running, it will automatically pick it up.
-    // If not, we process it directly.
-    if (!isQueueRunning) {
-      // Find the updated product to pass to processProduct
-      const updatedProduct = products.find(p => p.id === product.id);
-      if (updatedProduct) {
-        // We need to set isQueueRunningRef to true temporarily for this single run
-        // so that the internal checks in processProduct don't abort early.
-        const wasRunning = isQueueRunningRef.current;
-        isQueueRunningRef.current = true;
-        await processProduct(updatedProduct);
-        isQueueRunningRef.current = wasRunning;
-      }
-    }
+    // Process it directly as a manual run
+    const updatedProduct = products.find(p => p.id === product.id) || product;
+    await processProduct(updatedProduct, true);
   };
 
-  const processProduct = async (product: ProductPipeline) => {
+  const processProduct = async (product: ProductPipeline, isManual = false) => {
     updateProduct(product.id, { overallStatus: 'processing' });
 
     let factSheetData: FactSheet | undefined;
@@ -475,7 +464,7 @@ export default function App() {
     }
 
     // 2. SEO Title
-    if (!isQueueRunningRef.current) return;
+    if (!isManual && !isQueueRunningRef.current) return;
     updateProduct(product.id, { seo: { status: 'processing' } });
     try {
       seoData = await withRetry(() => optimizeTitle(factSheetData!, product.name));
@@ -485,7 +474,7 @@ export default function App() {
     }
 
     // 3. Marketing Points
-    if (!isQueueRunningRef.current) return;
+    if (!isManual && !isQueueRunningRef.current) return;
     updateProduct(product.id, { marketing: { status: 'processing' } });
     try {
       marketingData = await withRetry(() => generateMarketingPoints(factSheetData!));
@@ -495,7 +484,7 @@ export default function App() {
     }
 
     // 4. Attributes
-    if (!isQueueRunningRef.current) return;
+    if (!isManual && !isQueueRunningRef.current) return;
     updateProduct(product.id, { attributes: { status: 'processing' } });
     try {
       attrData = await withRetry(() => optimizeAttributes(product.rawRow['自定义属性'] || product.rawRow['产品属性'] || '', factSheetData!));
@@ -505,7 +494,7 @@ export default function App() {
     }
 
     // 5. Description
-    if (!isQueueRunningRef.current) return;
+    if (!isManual && !isQueueRunningRef.current) return;
     updateProduct(product.id, { description: { status: 'processing' } });
     try {
       descData = await withRetry(() => cleanDescriptions(
@@ -527,7 +516,7 @@ export default function App() {
     }
 
     // 6. Image Compliance
-    if (!isQueueRunningRef.current) return;
+    if (!isManual && !isQueueRunningRef.current) return;
     updateProduct(product.id, { compliance: { status: 'processing' } });
     try {
       const htmls = [
@@ -588,7 +577,7 @@ export default function App() {
     }
 
     // 7. Remaster Image
-    if (!isQueueRunningRef.current) return;
+    if (!isManual && !isQueueRunningRef.current) return;
     if (!enableImageRemaster) {
       updateProduct(product.id, { remaster: { status: 'idle' } });
     } else {
