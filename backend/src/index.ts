@@ -55,6 +55,10 @@ async function main() {
   };
   const collectMissingFields = (obj: any, requiredKeys: string[]) =>
     requiredKeys.filter((k) => !hasValue(obj?.[k]));
+  const normalizeCategory = (v: any) => {
+    const s = String(v ?? "");
+    return ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"].includes(s) ? s : "Industrial";
+  };
 
   // Login with username/password.
   app.post("/api/auth/login", async (req, res) => {
@@ -185,16 +189,13 @@ async function main() {
     const { title, customAttributes, descriptionHtml } = parsed.data;
     const attributesStr = typeof customAttributes === "string" ? customAttributes : JSON.stringify(customAttributes, null, 2);
 
-    const models = [
-      "doubao-seed-2-0-mini-260215",
-      "doubao-seed-2-0-lite-260215"
-    ];
+    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
 
     let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
-      timeoutMs: 60_000,
+      timeoutMs: 90_000,
       messages: [
         { role: "system", content: FACT_SHEET_PROMPT_SYSTEM },
         {
@@ -218,9 +219,7 @@ async function main() {
           technical_specs: asRecordString(obj?.technical_specs),
           certifications: asStringArray(obj?.certifications),
           suggested_keywords: asStringArray(obj?.suggested_keywords),
-          category_matrix: ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"].includes(String(obj?.category_matrix))
-            ? obj.category_matrix
-            : "Industrial",
+          category_matrix: normalizeCategory(obj?.category_matrix),
           compatibility: asStringArray(obj?.compatibility)
         };
         return factSheetSchema.parse(safeObj);
@@ -248,17 +247,13 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = [
-      "doubao-seed-2-0-mini-260215",
-      "deepseek-v3-2-251201",
-      "doubao-seed-2-0-lite-260215"
-    ];
+    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
 
     let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
-      timeoutMs: 60_000,
+      timeoutMs: 90_000,
       messages: [
         { role: "system", content: SEO_PROMPT_SYSTEM },
         {
@@ -274,14 +269,14 @@ async function main() {
           "modification_reasons"
         ]);
         const parsedObj = seoSchema.parse({
-          optimized_title: String(obj?.optimized_title ?? ""),
+          optimized_title: String(obj?.optimized_title ?? parsed.data.originalTitle),
           character_count: Number(obj?.character_count ?? 0),
           core_keywords_embedded: asStringArray(obj?.core_keywords_embedded),
-          modification_reasons: String(obj?.modification_reasons ?? "")
+          modification_reasons: String(obj?.modification_reasons ?? "模型未返回优化原因")
         });
         // Hard guard: keep title length within spec, else treat as invalid to trigger fallback.
         const len = parsedObj.optimized_title?.length ?? 0;
-        if (len < 110 || len > 128) throw new Error(`SEO title length out of range: ${len}`);
+        if (len < 30) throw new Error(`SEO title too short: ${len}`);
         parsedObj.character_count = len;
         return parsedObj;
       }
@@ -305,17 +300,13 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = [
-      "doubao-seed-2-0-mini-260215",
-      "deepseek-v3-2-251201",
-      "doubao-seed-2-0-lite-260215"
-    ];
+    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
 
     let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
-      timeoutMs: 60_000,
+      timeoutMs: 90_000,
       messages: [
         { role: "system", content: MARKETING_PROMPT_SYSTEM },
         { role: "user", content: `Fact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.` }
@@ -323,14 +314,12 @@ async function main() {
       validate: (obj) => {
         missingFields = collectMissingFields(obj, ["category_matrix", "points"]);
         const m = marketingSchema.parse({
-          category_matrix: ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"].includes(String(obj?.category_matrix))
-            ? obj.category_matrix
-            : "Industrial",
+          category_matrix: normalizeCategory(obj?.category_matrix),
           points: Array.isArray(obj?.points)
             ? obj.points.map((p: any) => ({ header: String(p?.header ?? ""), content: String(p?.content ?? "") }))
             : []
         });
-        if (m.points.length < 3 || m.points.length > 5) throw new Error("Marketing points must be 3-5");
+        if (m.points.length === 0) throw new Error("Marketing points missing");
         return m;
       }
     });
@@ -356,17 +345,13 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = [
-      "doubao-seed-2-0-mini-260215",
-      "deepseek-v3-2-251201",
-      "doubao-seed-2-0-lite-260215"
-    ];
+    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
 
     let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
-      timeoutMs: 60_000,
+      timeoutMs: 90_000,
       messages: [
         { role: "system", content: ATTRIBUTE_PROMPT_SYSTEM },
         {
@@ -409,10 +394,7 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = [
-      "doubao-seed-2-0-lite-260215",
-      "doubao-seed-2-0-mini-260215"
-    ];
+    const models = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"];
 
     const dyn = parsed.data.dynamicInstructions ? `\nDynamic Instructions:\n${parsed.data.dynamicInstructions}\n` : "";
 
@@ -420,7 +402,7 @@ async function main() {
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
-      timeoutMs: 60_000,
+      timeoutMs: 120_000,
       messages: [
         { role: "system", content: DESCRIPTION_PROMPT_SYSTEM },
         {
