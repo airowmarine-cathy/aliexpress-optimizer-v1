@@ -10,7 +10,7 @@ import { cleanDescriptions, type CleanedDescriptions } from './services/descript
 import { remasterImage, type RemasteredImage } from './services/imageService';
 import { type ProductImageCheckReport, extractImagesFromHtml, checkImageRisk } from './services/imageCheckService';
 import { Login } from './auth/Login';
-import { clearToken, me, type User } from './auth/api';
+import { auditClientEvent, clearToken, me, type User } from './auth/api';
 import { AdminPanel } from './auth/AdminPanel';
 
 // --- Utility Functions ---
@@ -347,6 +347,11 @@ export default function App() {
         setUploadStatus('success');
         setIsSyncing(true);
         setSyncMessage(`正在同步 ${parsedProducts.length} 个产品到云端...`);
+        void auditClientEvent('products.upload', {
+          filename: file.name,
+          itemCount: parsedProducts.length,
+          firstSheetName: sheetName
+        }).catch((err) => console.warn('audit upload failed', err));
 
         // 同步数据到 Google Sheets
         const GOOGLE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxyVRp9lYunJ-Pw0C8MqrVNULKMYHjwTlhUldYSBLkPHDA_SJkuwmwurSbU2oB_87CYXA/exec';
@@ -773,6 +778,12 @@ export default function App() {
       : `优化后产品_${timeString}.xlsx`;
 
     saveAs(blob, filename);
+    void auditClientEvent('products.export', {
+      filename,
+      itemCount: products.length,
+      completedCount,
+      failedCount
+    }).catch((err) => console.warn('audit export failed', err));
   };
 
   const completedCount = products.filter(p => p.overallStatus === 'completed').length;

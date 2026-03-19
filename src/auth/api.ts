@@ -78,3 +78,77 @@ export async function adminResetPassword(userId: string, newPassword: string) {
   return data.ok;
 }
 
+export async function auditClientEvent(action: string, details?: Record<string, any>) {
+  const data = await apiFetch<{ ok: true }>('/api/audit/client-event', {
+    method: 'POST',
+    body: JSON.stringify({ action, details })
+  });
+  return data.ok;
+}
+
+export async function adminUsageSummary(days = 30) {
+  return await apiFetch<{
+    days: number;
+    totals: {
+      total_calls: number;
+      total_input_tokens: number;
+      total_output_tokens: number;
+      total_cost_cny: string | number;
+    };
+    byStep: Array<{ step: string; calls: number; input_tokens: number; output_tokens: number; cost_cny: string | number }>;
+    byModel: Array<{ model_id: string; calls: number; input_tokens: number; output_tokens: number; cost_cny: string | number }>;
+    byUser: Array<{ owner_user_id: string | null; username: string; calls: number; input_tokens: number; output_tokens: number; cost_cny: string | number }>;
+  }>(`/api/admin/usage/summary?days=${days}`);
+}
+
+export async function adminUsageList(limit = 100) {
+  const data = await apiFetch<{
+    records: Array<{
+      id: string;
+      created_at: string;
+      step: string;
+      provider: string;
+      model_id: string;
+      input_tokens: number | null;
+      output_tokens: number | null;
+      cost_cny: string | number | null;
+      meta: any;
+      owner_user_id: string | null;
+      username: string;
+    }>;
+  }>(`/api/admin/usage/list?limit=${limit}`);
+  return data.records;
+}
+
+export async function adminAuditList(limit = 100) {
+  const data = await apiFetch<{
+    records: Array<{
+      id: string;
+      action: string;
+      details: any;
+      created_at: string;
+      actor_user_id: string | null;
+      username: string;
+    }>;
+  }>(`/api/admin/audit/list?limit=${limit}`);
+  return data.records;
+}
+
+export async function adminTasksList(limit = 100) {
+  const data = await apiFetch<{
+    records: Array<{
+      id: string;
+      source: 'job' | 'event';
+      status: string;
+      filename: string;
+      total_items: number;
+      created_at: string;
+      updated_at: string;
+      owner_user_id: string | null;
+      username: string;
+      details?: any;
+    }>;
+  }>(`/api/admin/tasks/list?limit=${limit}`);
+  return data.records;
+}
+

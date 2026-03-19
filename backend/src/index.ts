@@ -206,6 +206,10 @@ async function main() {
     if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
     const token = signToken({ id: row.id, username: row.username, role: row.role });
+    await pool.query(
+      `insert into audit_log (actor_user_id, action, details) values ($1, 'auth.login', $2)`,
+      [row.id, { username: row.username }]
+    );
     return res.json({ token, user: { id: row.id, username: row.username, role: row.role } });
   });
 
@@ -272,6 +276,192 @@ async function main() {
       [req.user!.id, { userId: params.data.userId }]
     );
     return res.json({ ok: true });
+  });
+
+  // Client-side user actions that should appear in admin audit.
+  app.post("/api/audit/client-event", requireAuth, async (req: AuthedRequest, res) => {
+    const bodySchema = z.object({
+      action: z.string().min(1).max(80),
+      details: z.record(z.any()).optional()
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    await pool.query(
+      `insert into audit_log (actor_user_id, action, details) values ($1, $2, $3)`,
+      [req.user!.id, parsed.data.action, parsed.data.details ?? {}]
+    );
+    return res.json({ ok: true });
+  });
+
+  app.get("/api/admin/usage/summary", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+    const querySchema = z.object({
+      days: z.coerce.number().int().min(1).max(365).default(30)
+    });
+    const parsed = querySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const { days } = parsed.data;
+    const totals = await pool.query(
+      `select
+         count(*)::int as total_calls,
+         coalesce(sum(input_tokens), 0)::int as total_input_tokens,
+         coalesce(sum(output_tokens), 0)::int as total_output_tokens,
+         coalesce(sum(cost_cny), 0)::numeric as total_cost_cny
+       from usage_records
+       where created_at >= now() - ($1::text || ' days')::interval`,
+      [String(days)]
+    );
+
+    const byStep = await pool.query(
+      `select step,
+              count(*)::int as calls,
+              coalesce(sum(input_tokens), 0)::int as input_tokens,
+              coalesce(sum(output_tokens), 0)::int as output_tokens,
+              coalesce(sum(cost_cny), 0)::numeric as cost_cny
+       from usage_records
+       where created_at >= now() - ($1::text || ' days')::interval
+       group by step
+       order by calls desc, step asc`,
+      [String(days)]
+    );
+
+    const byModel = await pool.query(
+      `select model_id,
+              count(*)::int as calls,
+              coalesce(sum(input_tokens), 0)::int as input_tokens,
+              coalesce(sum(output_tokens), 0)::int as output_tokens,
+              coalesce(sum(cost_cny), 0)::numeric as cost_cny
+       from usage_records
+       where created_at >= now() - ($1::text || ' days')::interval
+       group by model_id
+       order by calls desc, model_id asc`,
+      [String(days)]
+    );
+
+    const byUser = await pool.query(
+      `select coalesce(u.username, 'unknown') as username,
+              ur.owner_user_id,
+              count(*)::int as calls,
+              coalesce(sum(ur.input_tokens), 0)::int as input_tokens,
+              coalesce(sum(ur.output_tokens), 0)::int as output_tokens,
+              coalesce(sum(ur.cost_cny), 0)::numeric as cost_cny
+       from usage_records ur
+       left join users u on u.id = ur.owner_user_id
+       where ur.created_at >= now() - ($1::text || ' days')::interval
+       group by u.username, ur.owner_user_id
+       order by calls desc, username asc`,
+      [String(days)]
+    );
+
+    return res.json({
+      days,
+      totals: totals.rows[0],
+      byStep: byStep.rows,
+      byModel: byModel.rows,
+      byUser: byUser.rows
+    });
+  });
+
+  app.get("/api/admin/usage/list", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+    const querySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(500).default(100)
+    });
+    const parsed = querySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const rows = await pool.query(
+      `select ur.id,
+              ur.created_at,
+              ur.step,
+              ur.provider,
+              ur.model_id,
+              ur.input_tokens,
+              ur.output_tokens,
+              ur.cost_cny,
+              ur.meta,
+              ur.owner_user_id,
+              coalesce(u.username, 'unknown') as username
+       from usage_records ur
+       left join users u on u.id = ur.owner_user_id
+       order by ur.created_at desc
+       limit $1`,
+      [parsed.data.limit]
+    );
+    return res.json({ records: rows.rows });
+  });
+
+  app.get("/api/admin/audit/list", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+    const querySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(500).default(100)
+    });
+    const parsed = querySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const rows = await pool.query(
+      `select al.id,
+              al.action,
+              al.details,
+              al.created_at,
+              al.actor_user_id,
+              coalesce(u.username, 'unknown') as username
+       from audit_log al
+       left join users u on u.id = al.actor_user_id
+       order by al.created_at desc
+       limit $1`,
+      [parsed.data.limit]
+    );
+    return res.json({ records: rows.rows });
+  });
+
+  app.get("/api/admin/tasks/list", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+    const querySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(500).default(100)
+    });
+    const parsed = querySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const jobRows = await pool.query(
+      `select j.id,
+              'job' as source,
+              j.status,
+              j.filename,
+              j.total_items,
+              j.created_at,
+              j.updated_at,
+              j.owner_user_id,
+              coalesce(u.username, 'unknown') as username
+       from jobs j
+       left join users u on u.id = j.owner_user_id
+       order by j.created_at desc
+       limit $1`,
+      [parsed.data.limit]
+    );
+
+    const eventRows = await pool.query(
+      `select al.id,
+              'event' as source,
+              al.action as status,
+              coalesce(al.details->>'filename', '') as filename,
+              coalesce((al.details->>'itemCount')::int, 0) as total_items,
+              al.created_at,
+              al.created_at as updated_at,
+              al.actor_user_id as owner_user_id,
+              coalesce(u.username, 'unknown') as username,
+              al.details
+       from audit_log al
+       left join users u on u.id = al.actor_user_id
+       where al.action in ('products.upload', 'products.export')
+       order by al.created_at desc
+       limit $1`,
+      [parsed.data.limit]
+    );
+
+    const records = [...eventRows.rows, ...jobRows.rows]
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, parsed.data.limit);
+
+    return res.json({ records });
   });
 
   // --- Optimization (Text Steps) ---
