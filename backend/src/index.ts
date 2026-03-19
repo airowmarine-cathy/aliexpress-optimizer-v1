@@ -282,7 +282,7 @@ async function main() {
   app.post("/api/audit/client-event", requireAuth, async (req: AuthedRequest, res) => {
     const bodySchema = z.object({
       action: z.string().min(1).max(80),
-      details: z.record(z.any()).optional()
+      details: z.record(z.string(), z.any()).optional()
     });
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });

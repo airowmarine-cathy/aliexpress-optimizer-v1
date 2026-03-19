@@ -3,7 +3,7 @@ import { z } from "zod";
 export const factSheetSchema = z.object({
   material: z.string(),
   dimensions: z.string(),
-  technical_specs: z.record(z.string()),
+  technical_specs: z.record(z.string(), z.string()),
   certifications: z.array(z.string()),
   suggested_keywords: z.array(z.string()),
   category_matrix: z.enum(["Industrial", "Productivity", "Home", "Fashion", "Outdoor"]),
