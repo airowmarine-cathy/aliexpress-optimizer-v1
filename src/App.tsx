@@ -9,6 +9,9 @@ import { optimizeAttributes } from './services/attributeService';
 import { cleanDescriptions, type CleanedDescriptions } from './services/descriptionService';
 import { remasterImage, type RemasteredImage } from './services/imageService';
 import { type ProductImageCheckReport, extractImagesFromHtml, checkImageRisk } from './services/imageCheckService';
+import { Login } from './auth/Login';
+import { clearToken, me, type User } from './auth/api';
+import { AdminPanel } from './auth/AdminPanel';
 
 // --- Utility Functions ---
 
@@ -242,6 +245,10 @@ interface ProductPipeline {
 // --- Main Component ---
 
 export default function App() {
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showAdmin, setShowAdmin] = useState(false);
+
   const [products, setProducts] = useState<ProductPipeline[]>([]);
   const [isQueueRunning, setIsQueueRunning] = useState(false);
   const isQueueRunningRef = useRef(false);
@@ -266,6 +273,37 @@ export default function App() {
   const [uploadMessage, setUploadMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const u = await me();
+        if (alive) setAuthUser(u);
+      } catch {
+        if (alive) setAuthUser(null);
+      } finally {
+        if (alive) setAuthLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#f5f5f7] text-gray-800 font-sans flex items-center justify-center">
+        <div className="text-sm text-gray-500 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" /> 正在加载...
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return <Login onSuccess={async () => setAuthUser(await me())} />;
+  }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -762,6 +800,31 @@ export default function App() {
             <h1 className="text-[17px] font-semibold text-gray-900 tracking-tight">全球商品智能优化系统 V2.0</h1>
           </div>
           
+          <div className="flex items-center gap-3">
+            <div className="text-xs font-medium text-slate-500 hidden sm:block">
+              当前用户：<span className="text-slate-800">{authUser.username}</span>
+            </div>
+
+            {authUser.role === 'admin' && (
+              <button
+                onClick={() => setShowAdmin(true)}
+                className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm"
+              >
+                管理员
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                clearToken();
+                setAuthUser(null);
+              }}
+              className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm"
+            >
+              退出
+            </button>
+          </div>
+
           {products.length > 0 && (
             <div className="flex items-center gap-4">
               {syncMessage && (
@@ -1595,6 +1658,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {showAdmin && authUser.role === 'admin' && <AdminPanel onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }

@@ -82,6 +82,14 @@ async function main() {
     }
   });
 
+  // Admin: list users
+  app.get("/api/admin/users", requireAuth, requireAdmin, async (_req: AuthedRequest, res) => {
+    const users = await pool.query(
+      `select id, username, role, created_at, updated_at from users order by created_at desc`
+    );
+    return res.json({ users: users.rows });
+  });
+
   // Admin: reset password
   app.post("/api/admin/users/:userId/reset-password", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
     const paramsSchema = z.object({ userId: z.string().uuid() });
