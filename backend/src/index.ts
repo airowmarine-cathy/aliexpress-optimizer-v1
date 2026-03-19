@@ -9,6 +9,7 @@ import { ensureAdminBootstrap, requireAdmin, requireAuth, signToken, verifyPassw
 import { runMigrations } from "./migrate.js";
 import { getEnv } from "./env.js";
 import { runGeminiWithFallback } from "./gemini/client.js";
+import { estimateGeminiCostCny } from "./gemini/pricing.js";
 import { FACT_SHEET_PROMPT_SYSTEM, SEO_PROMPT_SYSTEM, MARKETING_PROMPT_SYSTEM, ATTRIBUTE_PROMPT_SYSTEM, DESCRIPTION_PROMPT_SYSTEM } from "./opt/prompts.js";
 import { attributesSchema, descriptionCleanFieldSchema, factSheetSchema, marketingSchema, seoSchema } from "./opt/schemas.js";
 
@@ -586,7 +587,7 @@ ${descriptionHtml}
       provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: null,
+      costCny: estimateGeminiCostCny(attempt.modelId, attempt.inputTokens, attempt.outputTokens),
       meta: { json_mode: attempt.jsonMode }
     });
 
@@ -623,7 +624,7 @@ ${descriptionHtml}
       provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: null,
+      costCny: estimateGeminiCostCny(attempt.modelId, attempt.inputTokens, attempt.outputTokens),
       meta: { json_mode: attempt.jsonMode }
     });
 
@@ -655,7 +656,7 @@ ${descriptionHtml}
       provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: null,
+      costCny: estimateGeminiCostCny(attempt.modelId, attempt.inputTokens, attempt.outputTokens),
       meta: { json_mode: attempt.jsonMode }
     });
 
@@ -686,7 +687,7 @@ ${descriptionHtml}
       provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: null,
+      costCny: estimateGeminiCostCny(attempt.modelId, attempt.inputTokens, attempt.outputTokens),
       meta: { json_mode: attempt.jsonMode }
     });
 
@@ -725,7 +726,7 @@ ${descriptionHtml}
       provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: null,
+      costCny: estimateGeminiCostCny(attempt.modelId, attempt.inputTokens, attempt.outputTokens),
       meta: {
         fieldName: parsed.data.fieldName,
         json_mode: attempt.jsonMode

@@ -100,6 +100,52 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   throw new Error('Unreachable');
 }
 
+const GOOGLE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxyVRp9lYunJ-Pw0C8MqrVNULKMYHjwTlhUldYSBLkPHDA_SJkuwmwurSbU2oB_87CYXA/exec';
+
+async function postGoogleSheetsWithRetry(
+  payload: Record<string, any>,
+  maxRetries = 3,
+  timeoutMs = 15000
+): Promise<{ ok: true; attempts: number; data: any } | { ok: false; attempts: number; error: string }> {
+  let lastError = 'Unknown sync error';
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(GOOGLE_SHEETS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      const text = await res.text();
+      let data: any = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text };
+        }
+      }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      if (data?.success === false) {
+        throw new Error(data?.error || 'Sheets returned success=false');
+      }
+      return { ok: true, attempts: attempt, data };
+    } catch (e: any) {
+      lastError = e?.name === 'AbortError' ? `Timeout after ${timeoutMs}ms` : String(e?.message || e || 'Sync failed');
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return { ok: false, attempts: maxRetries, error: lastError };
+}
+
 const fetchBase64ViaCanvas = (url: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -274,6 +320,27 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
 
+  const resetWorkspaceState = () => {
+    setProducts([]);
+    setIsQueueRunning(false);
+    isQueueRunningRef.current = false;
+    setExpandedProductId(null);
+    setActiveTabs({});
+    setLightboxImage(null);
+    setSelectingImageFor(null);
+    setEditingTitleId(null);
+    setTempTitle('');
+    setNewAttrKey('');
+    setNewAttrValue('');
+    setAddingAttrId(null);
+    setEditingComplianceId(null);
+    setUploadStatus('idle');
+    setUploadMessage('');
+    setSyncMessage('');
+    setIsSyncing(false);
+    setShowAdmin(false);
+  };
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -302,7 +369,10 @@ export default function App() {
   }
 
   if (!authUser) {
-    return <Login onSuccess={async () => setAuthUser(await me())} />;
+    return <Login onSuccess={async () => {
+      resetWorkspaceState();
+      setAuthUser(await me());
+    }} />;
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -353,34 +423,33 @@ export default function App() {
           firstSheetName: sheetName
         }).catch((err) => console.warn('audit upload failed', err));
 
-        // 同步数据到 Google Sheets
-        const GOOGLE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxyVRp9lYunJ-Pw0C8MqrVNULKMYHjwTlhUldYSBLkPHDA_SJkuwmwurSbU2oB_87CYXA/exec';
-        fetch(GOOGLE_SHEETS_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain',
-          },
-          body: JSON.stringify({
+        // 同步数据到 Google Sheets（带重试 + 超时）
+        void (async () => {
+          const sync = await postGoogleSheetsWithRetry({
             action: 'upload',
             sheetName: '产品表 (Product List)',
             data: jsonData
-          })
-        })
-        .then(res => res.json())
-        .then(res => {
+          }, 3, 15000);
+
           setIsSyncing(false);
-          if (res.success) {
+          if (sync.ok) {
             setSyncMessage(`成功导入并同步 ${parsedProducts.length} 个产品`);
             setTimeout(() => setSyncMessage(''), 3000);
+            void auditClientEvent('sheets.upload_sync.success', {
+              filename: file.name,
+              itemCount: parsedProducts.length,
+              attempts: sync.attempts
+            }).catch((err) => console.warn('audit sheets upload success failed', err));
           } else {
-            setSyncMessage(`云端同步失败: ${res.error || '未知错误'}`);
+            setSyncMessage(`云端同步失败（已重试${sync.attempts}次）: ${sync.error}`);
+            void auditClientEvent('sheets.upload_sync.fail', {
+              filename: file.name,
+              itemCount: parsedProducts.length,
+              attempts: sync.attempts,
+              error: sync.error
+            }).catch((err) => console.warn('audit sheets upload fail failed', err));
           }
-        })
-        .catch(err => {
-          console.error('Sync error:', err);
-          setIsSyncing(false);
-          setSyncMessage(`云端同步异常`);
-        });
+        })();
 
       } catch (error) {
         console.error(error);
@@ -435,30 +504,26 @@ export default function App() {
       
       updateProduct(product.id, { rawRow: { ...row } });
 
-      const GOOGLE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxyVRp9lYunJ-Pw0C8MqrVNULKMYHjwTlhUldYSBLkPHDA_SJkuwmwurSbU2oB_87CYXA/exec';
-      
-      await fetch(GOOGLE_SHEETS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'saveOptimizationData',
-          productId: product.id,
-          sheetName: 'Optimized Products',
-          rowData: row
-        })
-      });
+      const saveResult = await postGoogleSheetsWithRetry({
+        action: 'saveOptimizationData',
+        productId: product.id,
+        sheetName: 'Optimized Products',
+        rowData: row
+      }, 3, 12000);
+      if (!saveResult.ok) throw new Error(`saveOptimizationData failed: ${saveResult.error}`);
 
-      await fetch(GOOGLE_SHEETS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'updateOriginalTime',
-          productId: product.id,
-          optTime: optTime
-        })
-      });
+      const updateTimeResult = await postGoogleSheetsWithRetry({
+        action: 'updateOriginalTime',
+        productId: product.id,
+        optTime: optTime
+      }, 3, 12000);
+      if (!updateTimeResult.ok) throw new Error(`updateOriginalTime failed: ${updateTimeResult.error}`);
     } catch (error) {
       console.error('Failed to sync to Google Sheets:', error);
+      void auditClientEvent('sheets.product_sync.fail', {
+        productId: product.id,
+        error: String((error as any)?.message || error || 'unknown')
+      }).catch((err) => console.warn('audit sheets product sync failed', err));
     }
   };
 
@@ -828,6 +893,7 @@ export default function App() {
             <button
               onClick={() => {
                 clearToken();
+                resetWorkspaceState();
                 setAuthUser(null);
               }}
               className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm"
@@ -854,6 +920,18 @@ export default function App() {
                   <div className="bg-red-500 h-full transition-all duration-500" style={{ width: `${(failedCount / products.length) * 100}%` }} />
                 </div>
               </div>
+              <button
+                onClick={() => {
+                  if (isQueueRunningRef.current) {
+                    const ok = window.confirm('当前仍在批量优化中，确认停止并返回首页吗？');
+                    if (!ok) return;
+                  }
+                  resetWorkspaceState();
+                }}
+                className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 flex items-center gap-2 shadow-sm"
+              >
+                <Upload size={16} /> 返回首页
+              </button>
               <button
                 onClick={togglePipeline}
                 className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-sm ${

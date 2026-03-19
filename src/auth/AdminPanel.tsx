@@ -51,6 +51,13 @@ function fmtCost(v: string | number | null | undefined): string {
   return `¥${n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`;
 }
 
+function fmtTokenCompact(v: number): string {
+  if (!Number.isFinite(v) || v <= 0) return '0';
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return `${Math.round(v)}`;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub, icon }: { label: string; value: string; sub?: string; icon: React.ReactNode }) {
@@ -75,14 +82,14 @@ function HBarRow({
   max,
   colorClass = 'bg-indigo-500',
   cost,
-  unit = '次',
+  valueText,
 }: {
   label: string;
   value: number;
   max: number;
   colorClass?: string;
   cost?: string | number | null;
-  unit?: string;
+  valueText?: string;
 }) {
   const pct = max > 0 ? Math.max(3, Math.round((value / max) * 100)) : 3;
   return (
@@ -91,21 +98,19 @@ function HBarRow({
       <div className="flex-1 min-w-0 h-3.5 bg-gray-100 rounded-full overflow-hidden">
         <div className={`h-full ${colorClass} rounded-full transition-all duration-300`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="w-10 text-right flex-shrink-0 text-gray-600 tabular-nums">{value}{unit}</span>
+      <span className="w-14 text-right flex-shrink-0 text-gray-600 tabular-nums">{valueText ?? fmtTokenCompact(value)}</span>
       <span className="w-14 text-right flex-shrink-0 text-gray-400 tabular-nums">{fmtCost(cost)}</span>
     </div>
   );
 }
 
-/** SVG-based daily trend chart — supports bar + line mode and 3 metrics */
+/** SVG-based daily trend chart with y-axis + bar-line overlay */
 function DailyTrendChart({
   data,
   metric,
-  chartType,
 }: {
   data: Array<{ date: string; calls: number; input_tokens: number; output_tokens: number; cost_cny: string | number }>;
   metric: 'calls' | 'tokens' | 'cost';
-  chartType: 'bar' | 'line';
 }) {
   if (!data.length) {
     return <div className="h-28 flex items-center justify-center text-xs text-gray-400">暂无数据</div>;
@@ -118,10 +123,10 @@ function DailyTrendChart({
   });
 
   const maxVal = Math.max(...values, 1);
-  const W = 600;
-  const H = 96;
-  const PAD_L = 4;
-  const PAD_R = 4;
+  const W = 640;
+  const H = 112;
+  const PAD_L = 42;
+  const PAD_R = 8;
   const usableW = W - PAD_L - PAD_R;
   const step = usableW / data.length;
   const barW = Math.max(4, step - 3);
@@ -138,34 +143,49 @@ function DailyTrendChart({
     pts.map(([x, y]) => `L${x},${y}`).join(' ') +
     ` L${pts[pts.length - 1][0]},${H} Z`;
 
+  const yTicks = [1, 0.75, 0.5, 0.25, 0];
+  const yLabel = (v: number) => {
+    if (metric === 'cost') return fmtCost(v).replace('¥', '');
+    if (metric === 'tokens') return fmtTokenCompact(v);
+    return `${Math.round(v)}`;
+  };
+
   return (
-    <svg viewBox={`0 0 ${W} ${H + 22}`} className="w-full" preserveAspectRatio="none">
-      {/* Horizontal grid */}
-      {[0.25, 0.5, 0.75].map((f) => (
-        <line key={f} x1={PAD_L} x2={W - PAD_R} y1={H - f * H} y2={H - f * H} stroke="#f3f4f6" strokeWidth={1} />
+    <svg viewBox={`0 0 ${W} ${H + 24}`} className="w-full" preserveAspectRatio="none">
+      {/* Horizontal grid + y-axis labels */}
+      {yTicks.map((f) => {
+        const y = H - f * H;
+        const val = maxVal * f;
+        return (
+          <g key={f}>
+            <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="#f3f4f6" strokeWidth={1} />
+            <text x={PAD_L - 6} y={y + 3} textAnchor="end" fontSize={9} fill="#9ca3af">
+              {yLabel(val)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Bars */}
+      {data.map((_, i) => (
+        <rect
+          key={`bar-${i}`}
+          x={toX(i)}
+          y={toY(values[i])}
+          width={barW}
+          height={H - toY(values[i])}
+          fill="#818cf8"
+          rx={2}
+          opacity={0.42}
+        />
       ))}
 
-      {chartType === 'bar'
-        ? data.map((_, i) => (
-            <rect
-              key={i}
-              x={toX(i)}
-              y={toY(values[i])}
-              width={barW}
-              height={H - toY(values[i])}
-              fill="#6366f1"
-              rx={2}
-              opacity={0.72}
-            />
-          ))
-        : <>
-            <path d={areaPath} fill="#6366f1" fillOpacity={0.1} />
-            <polyline points={polylinePoints} fill="none" stroke="#6366f1" strokeWidth={2} strokeLinejoin="round" />
-            {data.map((_, i) => (
-              <circle key={i} cx={pts[i][0]} cy={pts[i][1]} r={3} fill="#6366f1" stroke="white" strokeWidth={1.5} />
-            ))}
-          </>
-      }
+      {/* Line overlay */}
+      <path d={areaPath} fill="#6366f1" fillOpacity={0.06} />
+      <polyline points={polylinePoints} fill="none" stroke="#4f46e5" strokeWidth={2.2} strokeLinejoin="round" />
+      {data.map((_, i) => (
+        <circle key={`dot-${i}`} cx={pts[i][0]} cy={pts[i][1]} r={2.8} fill="#4f46e5" stroke="white" strokeWidth={1.2} />
+      ))}
 
       {/* Date labels */}
       {data.map((d, i) =>
@@ -209,7 +229,6 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [days, setDays] = useState(30);
   const [userFilter, setUserFilter] = useState('');
   const [trendMetric, setTrendMetric] = useState<'calls' | 'tokens' | 'cost'>('calls');
-  const [trendType, setTrendType] = useState<'bar' | 'line'>('bar');
 
   // Tasks tab state
   const [auditRecords, setAuditRecords] = useState<Array<any>>([]);
@@ -353,14 +372,16 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
 
   // Merge canonical steps with actual data (show all 7 even if 0)
   const stepDataMap = useMemo(() => {
-    const m: Record<string, { calls: number; cost_cny: string | number }> = {};
-    for (const r of usageSummary?.byStep ?? []) m[r.step] = { calls: r.calls, cost_cny: r.cost_cny };
+    const m: Record<string, { tokens: number; cost_cny: string | number }> = {};
+    for (const r of usageSummary?.byStep ?? []) {
+      m[r.step] = { tokens: Number(r.input_tokens || 0) + Number(r.output_tokens || 0), cost_cny: r.cost_cny };
+    }
     return m;
   }, [usageSummary]);
 
-  const maxStepCalls = Math.max(...ALL_STEPS.map((s) => stepDataMap[s.key]?.calls ?? 0), 1);
-  const maxModelCalls = Math.max(...(usageSummary?.byModel.map((r) => r.calls) ?? [1]), 1);
-  const maxUserCalls = Math.max(...(usageSummary?.byUser.map((r) => r.calls) ?? [1]), 1);
+  const maxStepTokens = Math.max(...ALL_STEPS.map((s) => stepDataMap[s.key]?.tokens ?? 0), 1);
+  const maxModelTokens = Math.max(...(usageSummary?.byModel.map((r) => Number(r.input_tokens || 0) + Number(r.output_tokens || 0)) ?? [1]), 1);
+  const maxUserTokens = Math.max(...(usageSummary?.byUser.map((r) => Number(r.input_tokens || 0) + Number(r.output_tokens || 0)) ?? [1]), 1);
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-md flex items-center justify-center p-2 sm:p-4">
@@ -559,8 +580,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                           每日趋势
                         </div>
                         <div className="flex items-center gap-1.5">
-                          {/* Metric selector */}
-                          <div className="flex gap-1 mr-2">
+                          <div className="flex gap-1">
                             {([
                               ['calls',  '调用次数'],
                               ['tokens', 'Tokens'],
@@ -572,18 +592,9 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                                 }`}>{label}</button>
                             ))}
                           </div>
-                          {/* Chart type selector */}
-                          <div className="flex gap-1 border border-gray-200 rounded-lg p-0.5">
-                            {([['bar', '柱'], ['line', '线']] as const).map(([t, label]) => (
-                              <button key={t} onClick={() => setTrendType(t)}
-                                className={`px-2 py-0.5 rounded-md text-xs font-semibold transition-colors ${
-                                  trendType === t ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'
-                                }`}>{label}</button>
-                            ))}
-                          </div>
                         </div>
                       </div>
-                      <DailyTrendChart data={dailyData} metric={trendMetric} chartType={trendType} />
+                      <DailyTrendChart data={dailyData} metric={trendMetric} />
                     </div>
                   )}
 
@@ -592,15 +603,18 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                     {/* By Step */}
                     <div className="bg-white rounded-2xl border border-gray-200 p-4">
                       <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">按步骤分布</div>
-                      <div className="text-xs text-gray-400 mb-3">调用次数 / 花费</div>
+                      <div className="grid grid-cols-[80px_1fr_56px_56px] gap-2 mb-2 text-[11px] text-gray-400 font-semibold">
+                        <span>步骤</span><span></span><span className="text-right">Tokens</span><span className="text-right">花费</span>
+                      </div>
                       {ALL_STEPS.map((s, i) => (
                         <HBarRow
                           key={s.key}
                           label={s.label}
-                          value={stepDataMap[s.key]?.calls ?? 0}
-                          max={maxStepCalls}
+                          value={stepDataMap[s.key]?.tokens ?? 0}
+                          max={maxStepTokens}
                           colorClass={STEP_COLORS[i % STEP_COLORS.length]}
                           cost={stepDataMap[s.key]?.cost_cny}
+                          valueText={fmtTokenCompact(stepDataMap[s.key]?.tokens ?? 0)}
                         />
                       ))}
                     </div>
@@ -608,7 +622,9 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                     {/* By Model */}
                     <div className="bg-white rounded-2xl border border-gray-200 p-4">
                       <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">按模型分布</div>
-                      <div className="text-xs text-gray-400 mb-3">调用次数 / 花费</div>
+                      <div className="grid grid-cols-[80px_1fr_56px_56px] gap-2 mb-2 text-[11px] text-gray-400 font-semibold">
+                        <span>模型</span><span></span><span className="text-right">Tokens</span><span className="text-right">花费</span>
+                      </div>
                       {(usageSummary?.byModel ?? []).length === 0 ? (
                         <p className="text-xs text-gray-400 py-4 text-center">暂无数据</p>
                       ) : (
@@ -616,10 +632,11 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                           <HBarRow
                             key={row.model_id}
                             label={abbrevModel(row.model_id)}
-                            value={row.calls}
-                            max={maxModelCalls}
+                            value={Number(row.input_tokens || 0) + Number(row.output_tokens || 0)}
+                            max={maxModelTokens}
                             colorClass={MODEL_COLORS[i % MODEL_COLORS.length]}
                             cost={row.cost_cny}
+                            valueText={fmtTokenCompact(Number(row.input_tokens || 0) + Number(row.output_tokens || 0))}
                           />
                         ))
                       )}
@@ -628,7 +645,9 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                     {/* By User */}
                     <div className="bg-white rounded-2xl border border-gray-200 p-4">
                       <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">按用户分布</div>
-                      <div className="text-xs text-gray-400 mb-3">调用次数 / 花费</div>
+                      <div className="grid grid-cols-[80px_1fr_56px_56px] gap-2 mb-2 text-[11px] text-gray-400 font-semibold">
+                        <span>用户</span><span></span><span className="text-right">Tokens</span><span className="text-right">花费</span>
+                      </div>
                       {(usageSummary?.byUser ?? []).length === 0 ? (
                         <p className="text-xs text-gray-400 py-4 text-center">暂无数据</p>
                       ) : (
@@ -636,10 +655,11 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
                           <HBarRow
                             key={`${row.owner_user_id}`}
                             label={row.username}
-                            value={row.calls}
-                            max={maxUserCalls}
+                            value={Number(row.input_tokens || 0) + Number(row.output_tokens || 0)}
+                            max={maxUserTokens}
                             colorClass="bg-emerald-500"
                             cost={row.cost_cny}
+                            valueText={fmtTokenCompact(Number(row.input_tokens || 0) + Number(row.output_tokens || 0))}
                           />
                         ))
                       )}
