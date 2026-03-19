@@ -1,12 +1,3 @@
-import { FactSheet } from "./factSheetService";
-
-export interface SEOData {
-  optimized_title: string;
-  character_count: number;
-  core_keywords_embedded: string[];
-  modification_reasons: string;
-}
-
 export const SEO_PROMPT_SYSTEM = `
 ROLE: You are an Indexing Architect specializing in AliExpress SEO.
 OBJECTIVE: Generate a high-weight SEO title based on the provided Fact Sheet and Original Title.
@@ -35,15 +26,3 @@ DUAL-TRACK FORMULA (Choose based on Fact Sheet's category_matrix):
 OUTPUT: Include the character count of the optimized title, the core keywords used, and a brief explanation of the modifications in Simplified Chinese.
 `;
 
-// Kept for compatibility with existing code references (schema enforcement is now on backend).
-export const SEO_RESPONSE_SCHEMA = {};
-
-export async function optimizeTitle(factSheet: FactSheet, originalTitle: string): Promise<SEOData> {
-  const res = await fetch('/api/opt/seo-title', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ factSheet, originalTitle })
-  });
-  if (!res.ok) throw new Error(`SEO failed (${res.status})`);
-  return (await res.json()) as SEOData;
-}

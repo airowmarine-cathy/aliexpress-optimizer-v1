@@ -1,15 +1,3 @@
-import { FactSheet } from "./factSheetService";
-
-export interface MarketingPoint {
-  header: string;
-  content: string;
-}
-
-export interface MarketingData {
-  category_matrix: 'Industrial' | 'Productivity' | 'Home' | 'Fashion' | 'Outdoor';
-  points: MarketingPoint[];
-}
-
 export const MARKETING_PROMPT_SYSTEM = `
 ROLE: You are a Conversion Architect specializing in E-commerce Marketing.
 OBJECTIVE: Generate the "Golden 3-5 Point" description based ONLY on the provided Fact Sheet.
@@ -40,15 +28,3 @@ STRICT RULES:
 - LANGUAGE: Standard E-commerce English.
 `;
 
-// Kept for compatibility with existing code references (schema enforcement is now on backend).
-export const MARKETING_RESPONSE_SCHEMA = {};
-
-export async function generateMarketingPoints(factSheet: FactSheet): Promise<MarketingData> {
-  const res = await fetch('/api/opt/marketing', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ factSheet })
-  });
-  if (!res.ok) throw new Error(`Marketing failed (${res.status})`);
-  return (await res.json()) as MarketingData;
-}

@@ -7,6 +7,9 @@ import { createPool } from "./db.js";
 import { ensureAdminBootstrap, requireAdmin, requireAuth, signToken, verifyPassword, hashPassword, type AuthedRequest } from "./auth.js";
 import { runMigrations } from "./migrate.js";
 import { getEnv } from "./env.js";
+import { runWithModelFallback } from "./opt/router.js";
+import { FACT_SHEET_PROMPT_SYSTEM, SEO_PROMPT_SYSTEM, MARKETING_PROMPT_SYSTEM, ATTRIBUTE_PROMPT_SYSTEM, DESCRIPTION_PROMPT_SYSTEM } from "./opt/prompts.js";
+import { attributesSchema, descriptionCleanFieldSchema, factSheetSchema, marketingSchema, seoSchema } from "./opt/schemas.js";
 
 const env = getEnv();
 const pool = createPool();
@@ -109,6 +112,247 @@ async function main() {
       [req.user!.id, { userId: params.data.userId }]
     );
     return res.json({ ok: true });
+  });
+
+  // --- Optimization (Text Steps) ---
+  // These endpoints replace frontend direct model calls.
+  // They also record token usage & estimated cost into DB.
+
+  const recordUsage = async (args: {
+    ownerUserId: string;
+    step: string;
+    modelId: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    costCny?: number | null;
+    meta?: any;
+  }) => {
+    await pool.query(
+      `insert into usage_records (owner_user_id, step, provider, model_id, input_tokens, output_tokens, cost_cny, meta)
+       values ($1,$2,'ark',$3,$4,$5,$6,$7)`,
+      [
+        args.ownerUserId,
+        args.step,
+        args.modelId,
+        args.inputTokens ?? null,
+        args.outputTokens ?? null,
+        args.costCny ?? null,
+        args.meta ?? {}
+      ]
+    );
+  };
+
+  app.post("/api/opt/factsheet", requireAuth, async (req: AuthedRequest, res) => {
+    const bodySchema = z.object({
+      title: z.string(),
+      customAttributes: z.any(),
+      descriptionHtml: z.string()
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const { title, customAttributes, descriptionHtml } = parsed.data;
+    const attributesStr = typeof customAttributes === "string" ? customAttributes : JSON.stringify(customAttributes, null, 2);
+
+    const models = [
+      "doubao-seed-2-0-mini-260215",
+      "doubao-seed-2-0-lite-260215",
+      "doubao-seed-2-0-pro-260215"
+    ];
+
+    const { result, attempt } = await runWithModelFallback({
+      models,
+      responseFormatJson: true,
+      messages: [
+        { role: "system", content: FACT_SHEET_PROMPT_SYSTEM },
+        {
+          role: "user",
+          content: `Original Title: ${title}\n\nCustom Attributes: ${attributesStr}\n\nDescription HTML:\n${descriptionHtml}\n\nReturn JSON only.`
+        }
+      ],
+      validate: (obj) => factSheetSchema.parse(obj)
+    });
+
+    await recordUsage({
+      ownerUserId: req.user!.id,
+      step: "factSheet",
+      modelId: attempt.modelId,
+      inputTokens: attempt.inputTokens,
+      outputTokens: attempt.outputTokens,
+      costCny: attempt.costCny
+    });
+
+    return res.json(result);
+  });
+
+  app.post("/api/opt/seo-title", requireAuth, async (req: AuthedRequest, res) => {
+    const bodySchema = z.object({
+      factSheet: z.any(),
+      originalTitle: z.string()
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const models = [
+      "doubao-seed-2-0-mini-260215",
+      "deepseek-v3-2-251201",
+      "doubao-seed-2-0-lite-260215",
+      "doubao-seed-2-0-pro-260215"
+    ];
+
+    const { result, attempt } = await runWithModelFallback({
+      models,
+      responseFormatJson: true,
+      messages: [
+        { role: "system", content: SEO_PROMPT_SYSTEM },
+        {
+          role: "user",
+          content: `Original Title: ${parsed.data.originalTitle}\n\nFact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.`
+        }
+      ],
+      validate: (obj) => {
+        const parsedObj = seoSchema.parse(obj);
+        // Hard guard: keep title length within spec, else treat as invalid to trigger fallback.
+        const len = parsedObj.optimized_title?.length ?? 0;
+        if (len < 110 || len > 128) throw new Error(`SEO title length out of range: ${len}`);
+        parsedObj.character_count = len;
+        return parsedObj;
+      }
+    });
+
+    await recordUsage({
+      ownerUserId: req.user!.id,
+      step: "seoTitle",
+      modelId: attempt.modelId,
+      inputTokens: attempt.inputTokens,
+      outputTokens: attempt.outputTokens,
+      costCny: attempt.costCny
+    });
+
+    return res.json(result);
+  });
+
+  app.post("/api/opt/marketing", requireAuth, async (req: AuthedRequest, res) => {
+    const bodySchema = z.object({ factSheet: z.any() });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const models = [
+      "doubao-seed-2-0-mini-260215",
+      "deepseek-v3-2-251201",
+      "doubao-seed-2-0-lite-260215"
+    ];
+
+    const { result, attempt } = await runWithModelFallback({
+      models,
+      responseFormatJson: true,
+      messages: [
+        { role: "system", content: MARKETING_PROMPT_SYSTEM },
+        { role: "user", content: `Fact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.` }
+      ],
+      validate: (obj) => {
+        const m = marketingSchema.parse(obj);
+        if (m.points.length < 3 || m.points.length > 5) throw new Error("Marketing points must be 3-5");
+        return m;
+      }
+    });
+
+    await recordUsage({
+      ownerUserId: req.user!.id,
+      step: "marketing",
+      modelId: attempt.modelId,
+      inputTokens: attempt.inputTokens,
+      outputTokens: attempt.outputTokens,
+      costCny: attempt.costCny
+    });
+
+    return res.json(result);
+  });
+
+  app.post("/api/opt/attributes", requireAuth, async (req: AuthedRequest, res) => {
+    const bodySchema = z.object({
+      originalAttributes: z.string(),
+      factSheet: z.any()
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const models = [
+      "doubao-seed-2-0-mini-260215",
+      "deepseek-v3-2-251201",
+      "doubao-seed-2-0-lite-260215"
+    ];
+
+    const { result, attempt } = await runWithModelFallback({
+      models,
+      responseFormatJson: true,
+      messages: [
+        { role: "system", content: ATTRIBUTE_PROMPT_SYSTEM },
+        {
+          role: "user",
+          content: `Original Attributes: ${parsed.data.originalAttributes}\n\nFact Sheet Data: ${JSON.stringify(parsed.data.factSheet, null, 2)}\n\nReturn JSON only.`
+        }
+      ],
+      validate: (obj) => attributesSchema.parse(obj)
+    });
+
+    await recordUsage({
+      ownerUserId: req.user!.id,
+      step: "attributes",
+      modelId: attempt.modelId,
+      inputTokens: attempt.inputTokens,
+      outputTokens: attempt.outputTokens,
+      costCny: attempt.costCny
+    });
+
+    return res.json({
+      optimized: result.optimized_string || parsed.data.originalAttributes,
+      changes: result.changes_made || []
+    });
+  });
+
+  app.post("/api/opt/description/clean-field", requireAuth, async (req: AuthedRequest, res) => {
+    const bodySchema = z.object({
+      fieldName: z.string(),
+      content: z.string(),
+      factSheet: z.any(),
+      dynamicInstructions: z.string().optional()
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const models = [
+      "doubao-seed-2-0-lite-260215",
+      "doubao-seed-2-0-pro-260215",
+      "doubao-seed-2-0-mini-260215"
+    ];
+
+    const dyn = parsed.data.dynamicInstructions ? `\nDynamic Instructions:\n${parsed.data.dynamicInstructions}\n` : "";
+
+    const { result, attempt } = await runWithModelFallback({
+      models,
+      responseFormatJson: true,
+      messages: [
+        { role: "system", content: DESCRIPTION_PROMPT_SYSTEM },
+        {
+          role: "user",
+          content: `Task: Clean the following ${parsed.data.fieldName} HTML content.\n\nFact Sheet Data:\n${JSON.stringify(parsed.data.factSheet, null, 2)}\n${dyn}\nContent:\n${parsed.data.content}\n\nReturn JSON only.`
+        }
+      ],
+      validate: (obj) => descriptionCleanFieldSchema.parse(obj)
+    });
+
+    await recordUsage({
+      ownerUserId: req.user!.id,
+      step: "description",
+      modelId: attempt.modelId,
+      inputTokens: attempt.inputTokens,
+      outputTokens: attempt.outputTokens,
+      costCny: attempt.costCny,
+      meta: { fieldName: parsed.data.fieldName }
+    });
+
+    return res.json(result);
   });
 
   const port = env.PORT || 8080;

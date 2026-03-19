@@ -1,11 +1,3 @@
-import { FactSheet } from "./factSheetService";
-
-export interface OptimizedAttributes {
-  original: string;
-  optimized: string;
-  changes: string[];
-}
-
 export const ATTRIBUTE_PROMPT_SYSTEM = `
 ROLE: You are an E-commerce Data Sanitization Expert.
 OBJECTIVE: Clean, translate, and enrich product custom attributes based on the "Incremental Repair + Risk Removal" strategy.
@@ -54,20 +46,8 @@ STRICT 5-STEP PROCESS:
    - Do NOT invent attributes not present in Original Attributes or Fact Sheet.
 
 OUTPUT FORMAT:
-- Return a single string of key-value pairs separated by newlines (\n).
+- Return a single string of key-value pairs separated by newlines (\\n).
 - DO NOT add a space after the colon.
-- Example: "Material:Oxford Cloth\nColor:Black\nSize:50 cm (19.7 inches)"
+- Example: "Material:Oxford Cloth\\nColor:Black\\nSize:50 cm (19.7 inches)"
 `;
 
-// Kept for compatibility with existing code references (schema enforcement is now on backend).
-export const ATTRIBUTE_SCHEMA = {};
-
-export async function optimizeAttributes(originalAttributes: string, factSheet: FactSheet): Promise<{optimized: string, changes: string[]}> {
-  const res = await fetch('/api/opt/attributes', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ originalAttributes, factSheet })
-  });
-  if (!res.ok) throw new Error(`Attributes failed (${res.status})`);
-  return (await res.json()) as { optimized: string; changes: string[] };
-}

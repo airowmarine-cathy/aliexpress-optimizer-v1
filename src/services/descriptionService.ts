@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { FactSheet } from "./factSheetService";
 
 export interface CleanedDescriptions {
@@ -66,21 +65,8 @@ OUTPUT FORMAT:
   - Example: "[Warranty] Removed '12 months warranty'", "[Brand] Removed 'Samsung'"
 `;
 
-export const DESCRIPTION_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    cleaned_pc1: { type: Type.STRING, description: "Cleaned HTML for PC Description 1" },
-    cleaned_pc2: { type: Type.STRING, description: "Cleaned HTML for PC Description 2" },
-    cleaned_mobile1: { type: Type.STRING, description: "Cleaned HTML for Mobile Description 1" },
-    cleaned_mobile2: { type: Type.STRING, description: "Cleaned HTML for Mobile Description 2" },
-    changes_made: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "List of specific risk types removed (e.g., 'Removed MOQ', 'Removed Warranty')"
-    }
-  },
-  required: ["cleaned_pc1", "cleaned_pc2", "cleaned_mobile1", "cleaned_mobile2", "changes_made"]
-};
+// Kept for compatibility with existing code references (schema enforcement is now on backend).
+export const DESCRIPTION_SCHEMA = {};
 
 // Helper to strip base64 images to reduce token usage
 function stripImages(html: string): { stripped: string, placeholders: Map<string, string> } {
@@ -122,7 +108,6 @@ function stripExternalLinks(html: string): string {
 
 // Helper to clean a single field with retries
 async function cleanSingleField(
-  ai: GoogleGenAI, 
   fieldName: string, 
   content: string, 
   placeholders: Map<string, string>,
@@ -148,39 +133,18 @@ async function cleanSingleField(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `
-            Task: Clean the following ${fieldName} HTML content.
-            
-            Fact Sheet Data:
-            ${JSON.stringify(factSheet, null, 2)}
-
-            Dynamic Instructions:
-            ${dynamicInstructions}
-
-            Content:
-            ${content}
-            `,
-        config: {
-          systemInstruction: DESCRIPTION_PROMPT_SYSTEM,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              cleaned_html: { type: Type.STRING, description: "The cleaned HTML content" },
-              changes_made: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "List of removed items"
-              }
-            },
-            required: ["cleaned_html", "changes_made"]
-          },
-        },
+      const res = await fetch('/api/opt/description/clean-field', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fieldName,
+          content,
+          factSheet,
+          dynamicInstructions
+        })
       });
-
-      const result = JSON.parse(response.text || "{}");
+      if (!res.ok) throw new Error(`Clean field failed (${res.status})`);
+      const result = await res.json();
       return {
         cleaned: restoreImages(result.cleaned_html || '', placeholders),
         changes: result.changes_made || []
@@ -210,10 +174,6 @@ export async function cleanDescriptions(
   factSheet: FactSheet,
   options?: { removeSupplierInfo?: boolean, removeFAQ?: boolean, originalTitle?: string }
 ): Promise<CleanedDescriptions> {
-  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('未找到 API Key');
-  const ai = new GoogleGenAI({ apiKey });
-
   // If all inputs are empty, return empty immediately
   if (!pc1 && !pc2 && !mobile1 && !mobile2) {
     return { pc1: '', pc2: '', mobile1: '', mobile2: '', changes: [] };
@@ -238,10 +198,10 @@ export async function cleanDescriptions(
     // Gemini Flash has high rate limits, so parallel should be fine.
     
     const [resPc1, resPc2, resMobile1, resMobile2] = await Promise.all([
-      cleanSingleField(ai, 'PC Description 1', sPc1, pPc1, factSheet, options),
-      cleanSingleField(ai, 'PC Description 2', sPc2, pPc2, factSheet, options),
-      cleanSingleField(ai, 'Mobile Description 1', sMobile1, pMobile1, factSheet, options),
-      cleanSingleField(ai, 'Mobile Description 2', sMobile2, pMobile2, factSheet, options)
+      cleanSingleField('PC Description 1', sPc1, pPc1, factSheet, options),
+      cleanSingleField('PC Description 2', sPc2, pPc2, factSheet, options),
+      cleanSingleField('Mobile Description 1', sMobile1, pMobile1, factSheet, options),
+      cleanSingleField('Mobile Description 2', sMobile2, pMobile2, factSheet, options)
     ]);
 
     // 3. Aggregate results

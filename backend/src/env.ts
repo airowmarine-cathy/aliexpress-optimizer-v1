@@ -11,7 +11,7 @@ const envSchema = z.object({
   ADMIN_INITIAL_PASSWORD: z.string().min(10).optional(),
 
   // These will be used later when we switch model calls to backend.
-  ARK_API_KEY: z.string().min(1).optional(),
+  ARK_API_KEY: z.string().min(1),
   IMGBB_API_KEY: z.string().min(1).optional(),
   GOOGLE_SHEETS_URL: z.string().min(1).optional()
 });
