@@ -117,7 +117,7 @@ async function cleanSingleField(
 ): Promise<{ cleaned: string, changes: string[] }> {
   if (!content || !content.trim()) return { cleaned: '', changes: [] };
 
-  const MAX_RETRIES = 1;
+  const MAX_RETRIES = 2;
   let lastError;
 
   let dynamicInstructions = "";

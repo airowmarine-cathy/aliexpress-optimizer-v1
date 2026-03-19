@@ -7,7 +7,7 @@ import { createPool } from "./db.js";
 import { ensureAdminBootstrap, requireAdmin, requireAuth, signToken, verifyPassword, hashPassword, type AuthedRequest } from "./auth.js";
 import { runMigrations } from "./migrate.js";
 import { getEnv } from "./env.js";
-import { runWithModelFallback } from "./opt/router.js";
+import { runGeminiWithFallback } from "./gemini/client.js";
 import { FACT_SHEET_PROMPT_SYSTEM, SEO_PROMPT_SYSTEM, MARKETING_PROMPT_SYSTEM, ATTRIBUTE_PROMPT_SYSTEM, DESCRIPTION_PROMPT_SYSTEM } from "./opt/prompts.js";
 import { attributesSchema, descriptionCleanFieldSchema, factSheetSchema, marketingSchema, seoSchema } from "./opt/schemas.js";
 
@@ -156,6 +156,7 @@ async function main() {
   const recordUsage = async (args: {
     ownerUserId: string;
     step: string;
+    provider?: "gemini" | "ark";
     modelId: string;
     inputTokens?: number;
     outputTokens?: number;
@@ -164,10 +165,11 @@ async function main() {
   }) => {
     await pool.query(
       `insert into usage_records (owner_user_id, step, provider, model_id, input_tokens, output_tokens, cost_cny, meta)
-       values ($1,$2,'ark',$3,$4,$5,$6,$7)`,
+       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         args.ownerUserId,
         args.step,
+        args.provider ?? "gemini",
         args.modelId,
         args.inputTokens ?? null,
         args.outputTokens ?? null,
@@ -189,51 +191,23 @@ async function main() {
     const { title, customAttributes, descriptionHtml } = parsed.data;
     const attributesStr = typeof customAttributes === "string" ? customAttributes : JSON.stringify(customAttributes, null, 2);
 
-    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
-
-    let missingFields: string[] = [];
-    const { result, attempt } = await runWithModelFallback({
+    const models = ["gemini-3-flash-preview"];
+    const { result, attempt } = await runGeminiWithFallback({
       models,
-      responseFormatJson: true,
-      timeoutMs: 90_000,
-      messages: [
-        { role: "system", content: FACT_SHEET_PROMPT_SYSTEM },
-        {
-          role: "user",
-          content: `Original Title: ${title}\n\nCustom Attributes: ${attributesStr}\n\nDescription HTML:\n${descriptionHtml}\n\nReturn JSON only.`
-        }
-      ],
-      validate: (obj) => {
-        missingFields = collectMissingFields(obj, [
-          "material",
-          "dimensions",
-          "technical_specs",
-          "certifications",
-          "suggested_keywords",
-          "category_matrix",
-          "compatibility"
-        ]);
-        const safeObj = {
-          material: String(obj?.material ?? ""),
-          dimensions: String(obj?.dimensions ?? ""),
-          technical_specs: asRecordString(obj?.technical_specs),
-          certifications: asStringArray(obj?.certifications),
-          suggested_keywords: asStringArray(obj?.suggested_keywords),
-          category_matrix: normalizeCategory(obj?.category_matrix),
-          compatibility: asStringArray(obj?.compatibility)
-        };
-        return factSheetSchema.parse(safeObj);
-      }
+      systemInstruction: FACT_SHEET_PROMPT_SYSTEM,
+      userContent: `Original Title: ${title}\n\nCustom Attributes: ${attributesStr}\n\nDescription HTML:\n${descriptionHtml}\n\nReturn JSON only.`,
+      validate: (obj) => factSheetSchema.parse(obj)
     });
 
     await recordUsage({
       ownerUserId: req.user!.id,
       step: "factSheet",
       modelId: attempt.modelId,
+      provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny,
-      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
+      costCny: null,
+      meta: { json_mode: attempt.jsonMode }
     });
 
     return res.json(result);
@@ -247,36 +221,15 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
-
-    let missingFields: string[] = [];
-    const { result, attempt } = await runWithModelFallback({
+    const models = ["gemini-3-flash-preview"];
+    const { result, attempt } = await runGeminiWithFallback({
       models,
-      responseFormatJson: true,
-      timeoutMs: 90_000,
-      messages: [
-        { role: "system", content: SEO_PROMPT_SYSTEM },
-        {
-          role: "user",
-          content: `Original Title: ${parsed.data.originalTitle}\n\nFact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.`
-        }
-      ],
+      systemInstruction: SEO_PROMPT_SYSTEM,
+      userContent: `Original Title: ${parsed.data.originalTitle}\n\nFact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.`,
       validate: (obj) => {
-        missingFields = collectMissingFields(obj, [
-          "optimized_title",
-          "character_count",
-          "core_keywords_embedded",
-          "modification_reasons"
-        ]);
-        const parsedObj = seoSchema.parse({
-          optimized_title: String(obj?.optimized_title ?? parsed.data.originalTitle),
-          character_count: Number(obj?.character_count ?? 0),
-          core_keywords_embedded: asStringArray(obj?.core_keywords_embedded),
-          modification_reasons: String(obj?.modification_reasons ?? "模型未返回优化原因")
-        });
-        // Hard guard: keep title length within spec, else treat as invalid to trigger fallback.
+        const parsedObj = seoSchema.parse(obj);
         const len = parsedObj.optimized_title?.length ?? 0;
-        if (len < 30) throw new Error(`SEO title too short: ${len}`);
+        if (len < 110 || len > 128) throw new Error(`SEO title length out of range: ${len}`);
         parsedObj.character_count = len;
         return parsedObj;
       }
@@ -286,10 +239,11 @@ async function main() {
       ownerUserId: req.user!.id,
       step: "seoTitle",
       modelId: attempt.modelId,
+      provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny,
-      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
+      costCny: null,
+      meta: { json_mode: attempt.jsonMode }
     });
 
     return res.json(result);
@@ -300,26 +254,14 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
-
-    let missingFields: string[] = [];
-    const { result, attempt } = await runWithModelFallback({
+    const models = ["gemini-3-flash-preview"];
+    const { result, attempt } = await runGeminiWithFallback({
       models,
-      responseFormatJson: true,
-      timeoutMs: 90_000,
-      messages: [
-        { role: "system", content: MARKETING_PROMPT_SYSTEM },
-        { role: "user", content: `Fact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.` }
-      ],
+      systemInstruction: MARKETING_PROMPT_SYSTEM,
+      userContent: `Fact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.`,
       validate: (obj) => {
-        missingFields = collectMissingFields(obj, ["category_matrix", "points"]);
-        const m = marketingSchema.parse({
-          category_matrix: normalizeCategory(obj?.category_matrix),
-          points: Array.isArray(obj?.points)
-            ? obj.points.map((p: any) => ({ header: String(p?.header ?? ""), content: String(p?.content ?? "") }))
-            : []
-        });
-        if (m.points.length === 0) throw new Error("Marketing points missing");
+        const m = marketingSchema.parse(obj);
+        if (m.points.length < 3 || m.points.length > 5) throw new Error("Marketing points must be 3-5");
         return m;
       }
     });
@@ -328,10 +270,11 @@ async function main() {
       ownerUserId: req.user!.id,
       step: "marketing",
       modelId: attempt.modelId,
+      provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny,
-      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
+      costCny: null,
+      meta: { json_mode: attempt.jsonMode }
     });
 
     return res.json(result);
@@ -345,37 +288,23 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = ["doubao-seed-2-0-pro-260215", "deepseek-v3-2-251201"];
-
-    let missingFields: string[] = [];
-    const { result, attempt } = await runWithModelFallback({
+    const models = ["gemini-3-flash-preview"];
+    const { result, attempt } = await runGeminiWithFallback({
       models,
-      responseFormatJson: true,
-      timeoutMs: 90_000,
-      messages: [
-        { role: "system", content: ATTRIBUTE_PROMPT_SYSTEM },
-        {
-          role: "user",
-          content: `Original Attributes: ${parsed.data.originalAttributes}\n\nFact Sheet Data: ${JSON.stringify(parsed.data.factSheet, null, 2)}\n\nReturn JSON only.`
-        }
-      ],
-      validate: (obj) => {
-        missingFields = collectMissingFields(obj, ["optimized_string", "changes_made"]);
-        return attributesSchema.parse({
-          optimized_string: String(obj?.optimized_string ?? ""),
-          changes_made: asStringArray(obj?.changes_made)
-        });
-      }
+      systemInstruction: ATTRIBUTE_PROMPT_SYSTEM,
+      userContent: `Original Attributes: ${parsed.data.originalAttributes}\n\nFact Sheet Data: ${JSON.stringify(parsed.data.factSheet, null, 2)}\n\nReturn JSON only.`,
+      validate: (obj) => attributesSchema.parse(obj)
     });
 
     await recordUsage({
       ownerUserId: req.user!.id,
       step: "attributes",
       modelId: attempt.modelId,
+      provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny,
-      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
+      costCny: null,
+      meta: { json_mode: attempt.jsonMode }
     });
 
     return res.json({
@@ -394,42 +323,28 @@ async function main() {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const models = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"];
+    const models = ["gemini-3-flash-preview"];
 
     const dyn = parsed.data.dynamicInstructions ? `\nDynamic Instructions:\n${parsed.data.dynamicInstructions}\n` : "";
 
-    let missingFields: string[] = [];
-    const { result, attempt } = await runWithModelFallback({
+    const { result, attempt } = await runGeminiWithFallback({
       models,
-      responseFormatJson: true,
-      timeoutMs: 120_000,
-      messages: [
-        { role: "system", content: DESCRIPTION_PROMPT_SYSTEM },
-        {
-          role: "user",
-          content: `Task: Clean the following ${parsed.data.fieldName} HTML content.\n\nFact Sheet Data:\n${JSON.stringify(parsed.data.factSheet, null, 2)}\n${dyn}\nContent:\n${parsed.data.content}\n\nReturn JSON only.`
-        }
-      ],
-      validate: (obj) => {
-        missingFields = collectMissingFields(obj, ["cleaned_html", "changes_made"]);
-        return descriptionCleanFieldSchema.parse({
-          cleaned_html: String(obj?.cleaned_html ?? ""),
-          changes_made: asStringArray(obj?.changes_made)
-        });
-      }
+      systemInstruction: DESCRIPTION_PROMPT_SYSTEM,
+      userContent: `Task: Clean the following ${parsed.data.fieldName} HTML content.\n\nFact Sheet Data:\n${JSON.stringify(parsed.data.factSheet, null, 2)}\n${dyn}\nContent:\n${parsed.data.content}\n\nReturn JSON only.`,
+      validate: (obj) => descriptionCleanFieldSchema.parse(obj)
     });
 
     await recordUsage({
       ownerUserId: req.user!.id,
       step: "description",
       modelId: attempt.modelId,
+      provider: "gemini",
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny,
+      costCny: null,
       meta: {
         fieldName: parsed.data.fieldName,
-        json_mode: attempt.jsonMode,
-        missing_fields: missingFields
+        json_mode: attempt.jsonMode
       }
     });
 
