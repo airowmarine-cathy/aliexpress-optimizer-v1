@@ -14,6 +14,7 @@ export async function runWithModelFallback<T>(args: {
   messages: { role: "system" | "user"; content: string }[];
   responseFormatJson?: boolean;
   validate: (obj: any) => T;
+  timeoutMs?: number;
 }): Promise<{ result: T; attempt: RouteAttempt }> {
   let lastErr: any = null;
 
@@ -22,6 +23,7 @@ export async function runWithModelFallback<T>(args: {
       const completion = await arkChatCompletion({
         model: modelId,
         messages: args.messages,
+        timeoutMs: args.timeoutMs ?? 60_000,
         response_format: args.responseFormatJson ? { type: "json_object" } : undefined
       });
 

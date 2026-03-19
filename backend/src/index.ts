@@ -25,6 +25,16 @@ async function main() {
 
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
+  const asyncRoute =
+    (fn: (req: any, res: any) => Promise<any>) =>
+    (req: any, res: any) => {
+      fn(req, res).catch((e) => {
+        console.error("[route_error]", e);
+        if (res.headersSent) return;
+        res.status(500).json({ error: "Internal server error" });
+      });
+    };
+
   // Login with username/password.
   app.post("/api/auth/login", async (req, res) => {
     const bodySchema = z.object({
@@ -142,7 +152,7 @@ async function main() {
     );
   };
 
-  app.post("/api/opt/factsheet", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/opt/factsheet", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
     const bodySchema = z.object({
       title: z.string(),
       customAttributes: z.any(),
@@ -163,6 +173,7 @@ async function main() {
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
+      timeoutMs: 60_000,
       messages: [
         { role: "system", content: FACT_SHEET_PROMPT_SYSTEM },
         {
@@ -183,9 +194,9 @@ async function main() {
     });
 
     return res.json(result);
-  });
+  }));
 
-  app.post("/api/opt/seo-title", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/opt/seo-title", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
     const bodySchema = z.object({
       factSheet: z.any(),
       originalTitle: z.string()
@@ -203,6 +214,7 @@ async function main() {
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
+      timeoutMs: 60_000,
       messages: [
         { role: "system", content: SEO_PROMPT_SYSTEM },
         {
@@ -230,9 +242,9 @@ async function main() {
     });
 
     return res.json(result);
-  });
+  }));
 
-  app.post("/api/opt/marketing", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/opt/marketing", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
     const bodySchema = z.object({ factSheet: z.any() });
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
@@ -246,6 +258,7 @@ async function main() {
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
+      timeoutMs: 60_000,
       messages: [
         { role: "system", content: MARKETING_PROMPT_SYSTEM },
         { role: "user", content: `Fact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.` }
@@ -267,9 +280,9 @@ async function main() {
     });
 
     return res.json(result);
-  });
+  }));
 
-  app.post("/api/opt/attributes", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/opt/attributes", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
     const bodySchema = z.object({
       originalAttributes: z.string(),
       factSheet: z.any()
@@ -286,6 +299,7 @@ async function main() {
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
+      timeoutMs: 60_000,
       messages: [
         { role: "system", content: ATTRIBUTE_PROMPT_SYSTEM },
         {
@@ -309,9 +323,9 @@ async function main() {
       optimized: result.optimized_string || parsed.data.originalAttributes,
       changes: result.changes_made || []
     });
-  });
+  }));
 
-  app.post("/api/opt/description/clean-field", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/opt/description/clean-field", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
     const bodySchema = z.object({
       fieldName: z.string(),
       content: z.string(),
@@ -332,6 +346,7 @@ async function main() {
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
+      timeoutMs: 60_000,
       messages: [
         { role: "system", content: DESCRIPTION_PROMPT_SYSTEM },
         {
@@ -353,7 +368,7 @@ async function main() {
     });
 
     return res.json(result);
-  });
+  }));
 
   const port = env.PORT || 8080;
   app.listen(port, "0.0.0.0", () => {

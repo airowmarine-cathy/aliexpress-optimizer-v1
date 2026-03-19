@@ -21,12 +21,16 @@ export async function arkChatCompletion(args: {
   messages: ChatMessage[];
   temperature?: number;
   max_tokens?: number;
+  timeoutMs?: number;
   // Ask provider to return json object if supported.
   response_format?: { type: "json_object" };
 }) {
   const env = getEnv();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), args.timeoutMs ?? 60_000);
   const res = await fetch(`${ARK_BASE_URL}/chat/completions`, {
     method: "POST",
+    signal: controller.signal,
     headers: {
       Authorization: `Bearer ${env.ARK_API_KEY}`,
       "Content-Type": "application/json"
@@ -38,7 +42,7 @@ export async function arkChatCompletion(args: {
       max_tokens: args.max_tokens,
       response_format: args.response_format
     })
-  });
+  }).finally(() => clearTimeout(timeout));
 
   const text = await res.text();
   let json: any = null;
