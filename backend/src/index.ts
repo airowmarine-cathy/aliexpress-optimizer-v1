@@ -29,11 +29,32 @@ async function main() {
     (fn: (req: any, res: any) => Promise<any>) =>
     (req: any, res: any) => {
       fn(req, res).catch((e) => {
-        console.error("[route_error]", e);
+        if (e instanceof z.ZodError) {
+          console.error("[route_error][zod]", JSON.stringify(e.issues));
+        } else {
+          console.error("[route_error]", e);
+        }
         if (res.headersSent) return;
         res.status(500).json({ error: "Internal server error" });
       });
     };
+
+  const asStringArray = (v: any): string[] => Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : [];
+  const asRecordString = (v: any): Record<string, string> => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, val] of Object.entries(v)) out[String(k)] = String(val ?? "");
+    return out;
+  };
+  const hasValue = (v: any) => {
+    if (v === null || v === undefined) return false;
+    if (typeof v === "string") return v.trim().length > 0;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return Object.keys(v).length > 0;
+    return true;
+  };
+  const collectMissingFields = (obj: any, requiredKeys: string[]) =>
+    requiredKeys.filter((k) => !hasValue(obj?.[k]));
 
   // Login with username/password.
   app.post("/api/auth/login", async (req, res) => {
@@ -169,6 +190,7 @@ async function main() {
       "doubao-seed-2-0-lite-260215"
     ];
 
+    let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
@@ -180,7 +202,29 @@ async function main() {
           content: `Original Title: ${title}\n\nCustom Attributes: ${attributesStr}\n\nDescription HTML:\n${descriptionHtml}\n\nReturn JSON only.`
         }
       ],
-      validate: (obj) => factSheetSchema.parse(obj)
+      validate: (obj) => {
+        missingFields = collectMissingFields(obj, [
+          "material",
+          "dimensions",
+          "technical_specs",
+          "certifications",
+          "suggested_keywords",
+          "category_matrix",
+          "compatibility"
+        ]);
+        const safeObj = {
+          material: String(obj?.material ?? ""),
+          dimensions: String(obj?.dimensions ?? ""),
+          technical_specs: asRecordString(obj?.technical_specs),
+          certifications: asStringArray(obj?.certifications),
+          suggested_keywords: asStringArray(obj?.suggested_keywords),
+          category_matrix: ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"].includes(String(obj?.category_matrix))
+            ? obj.category_matrix
+            : "Industrial",
+          compatibility: asStringArray(obj?.compatibility)
+        };
+        return factSheetSchema.parse(safeObj);
+      }
     });
 
     await recordUsage({
@@ -189,7 +233,8 @@ async function main() {
       modelId: attempt.modelId,
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny
+      costCny: attempt.costCny,
+      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
     });
 
     return res.json(result);
@@ -209,6 +254,7 @@ async function main() {
       "doubao-seed-2-0-lite-260215"
     ];
 
+    let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
@@ -221,7 +267,18 @@ async function main() {
         }
       ],
       validate: (obj) => {
-        const parsedObj = seoSchema.parse(obj);
+        missingFields = collectMissingFields(obj, [
+          "optimized_title",
+          "character_count",
+          "core_keywords_embedded",
+          "modification_reasons"
+        ]);
+        const parsedObj = seoSchema.parse({
+          optimized_title: String(obj?.optimized_title ?? ""),
+          character_count: Number(obj?.character_count ?? 0),
+          core_keywords_embedded: asStringArray(obj?.core_keywords_embedded),
+          modification_reasons: String(obj?.modification_reasons ?? "")
+        });
         // Hard guard: keep title length within spec, else treat as invalid to trigger fallback.
         const len = parsedObj.optimized_title?.length ?? 0;
         if (len < 110 || len > 128) throw new Error(`SEO title length out of range: ${len}`);
@@ -236,7 +293,8 @@ async function main() {
       modelId: attempt.modelId,
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny
+      costCny: attempt.costCny,
+      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
     });
 
     return res.json(result);
@@ -253,6 +311,7 @@ async function main() {
       "doubao-seed-2-0-lite-260215"
     ];
 
+    let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
@@ -262,7 +321,15 @@ async function main() {
         { role: "user", content: `Fact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.` }
       ],
       validate: (obj) => {
-        const m = marketingSchema.parse(obj);
+        missingFields = collectMissingFields(obj, ["category_matrix", "points"]);
+        const m = marketingSchema.parse({
+          category_matrix: ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"].includes(String(obj?.category_matrix))
+            ? obj.category_matrix
+            : "Industrial",
+          points: Array.isArray(obj?.points)
+            ? obj.points.map((p: any) => ({ header: String(p?.header ?? ""), content: String(p?.content ?? "") }))
+            : []
+        });
         if (m.points.length < 3 || m.points.length > 5) throw new Error("Marketing points must be 3-5");
         return m;
       }
@@ -274,7 +341,8 @@ async function main() {
       modelId: attempt.modelId,
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny
+      costCny: attempt.costCny,
+      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
     });
 
     return res.json(result);
@@ -294,6 +362,7 @@ async function main() {
       "doubao-seed-2-0-lite-260215"
     ];
 
+    let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
@@ -305,7 +374,13 @@ async function main() {
           content: `Original Attributes: ${parsed.data.originalAttributes}\n\nFact Sheet Data: ${JSON.stringify(parsed.data.factSheet, null, 2)}\n\nReturn JSON only.`
         }
       ],
-      validate: (obj) => attributesSchema.parse(obj)
+      validate: (obj) => {
+        missingFields = collectMissingFields(obj, ["optimized_string", "changes_made"]);
+        return attributesSchema.parse({
+          optimized_string: String(obj?.optimized_string ?? ""),
+          changes_made: asStringArray(obj?.changes_made)
+        });
+      }
     });
 
     await recordUsage({
@@ -314,7 +389,8 @@ async function main() {
       modelId: attempt.modelId,
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
-      costCny: attempt.costCny
+      costCny: attempt.costCny,
+      meta: { json_mode: attempt.jsonMode, missing_fields: missingFields }
     });
 
     return res.json({
@@ -340,6 +416,7 @@ async function main() {
 
     const dyn = parsed.data.dynamicInstructions ? `\nDynamic Instructions:\n${parsed.data.dynamicInstructions}\n` : "";
 
+    let missingFields: string[] = [];
     const { result, attempt } = await runWithModelFallback({
       models,
       responseFormatJson: true,
@@ -351,7 +428,13 @@ async function main() {
           content: `Task: Clean the following ${parsed.data.fieldName} HTML content.\n\nFact Sheet Data:\n${JSON.stringify(parsed.data.factSheet, null, 2)}\n${dyn}\nContent:\n${parsed.data.content}\n\nReturn JSON only.`
         }
       ],
-      validate: (obj) => descriptionCleanFieldSchema.parse(obj)
+      validate: (obj) => {
+        missingFields = collectMissingFields(obj, ["cleaned_html", "changes_made"]);
+        return descriptionCleanFieldSchema.parse({
+          cleaned_html: String(obj?.cleaned_html ?? ""),
+          changes_made: asStringArray(obj?.changes_made)
+        });
+      }
     });
 
     await recordUsage({
@@ -361,7 +444,11 @@ async function main() {
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
       costCny: attempt.costCny,
-      meta: { fieldName: parsed.data.fieldName }
+      meta: {
+        fieldName: parsed.data.fieldName,
+        json_mode: attempt.jsonMode,
+        missing_fields: missingFields
+      }
     });
 
     return res.json(result);

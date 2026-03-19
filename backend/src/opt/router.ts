@@ -4,6 +4,7 @@ import { arkChatCompletion, extractJsonObject } from "../ark/openaiCompat.js";
 export type RouteAttempt = {
   provider: "ark";
   modelId: string;
+  jsonMode: "native" | "fallback_parse";
   inputTokens?: number;
   outputTokens?: number;
   costCny?: number | null;
@@ -39,6 +40,7 @@ export async function runWithModelFallback<T>(args: {
         attempt: {
           provider: "ark",
           modelId,
+          jsonMode: completion.jsonMode,
           inputTokens,
           outputTokens,
           costCny

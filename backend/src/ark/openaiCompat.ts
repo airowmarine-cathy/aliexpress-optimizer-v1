@@ -7,6 +7,7 @@ export type ChatMessage =
 
 export type ChatCompletionResult = {
   content: string;
+  jsonMode: "native" | "fallback_parse";
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -93,7 +94,7 @@ export async function arkChatCompletion(args: {
       }
       const content2 = json2?.choices?.[0]?.message?.content ?? "";
       const usage2 = json2?.usage;
-      return { content: content2, usage: usage2 } as ChatCompletionResult;
+      return { content: content2, usage: usage2, jsonMode: "fallback_parse" } as ChatCompletionResult;
     }
 
     const err: any = new Error(msg0);
@@ -104,7 +105,7 @@ export async function arkChatCompletion(args: {
 
   const content = json?.choices?.[0]?.message?.content ?? "";
   const usage = json?.usage;
-  return { content, usage } as ChatCompletionResult;
+  return { content, usage, jsonMode: "native" } as ChatCompletionResult;
 }
 
 export function extractJsonObject(text: string): any {
