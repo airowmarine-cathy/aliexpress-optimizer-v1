@@ -124,7 +124,8 @@ function DailyTrendChart({
 
   const maxVal = Math.max(...values, 1);
   const W = 640;
-  const H = 112;
+  const TOP = 10;
+  const H = 96;
   const PAD_L = 42;
   const PAD_R = 8;
   const usableW = W - PAD_L - PAD_R;
@@ -132,16 +133,16 @@ function DailyTrendChart({
   const barW = Math.max(4, step - 3);
   const labelEvery = Math.max(1, Math.ceil(data.length / 8));
 
-  const toY = (v: number) => H - Math.max(2, Math.round((v / maxVal) * H));
+  const toY = (v: number) => TOP + (H - Math.max(2, Math.round((v / maxVal) * H)));
   const toX = (i: number) => PAD_L + i * step;
 
   // Points for line chart
   const pts = data.map((_, i) => [toX(i) + barW / 2, toY(values[i])] as [number, number]);
   const polylinePoints = pts.map(([x, y]) => `${x},${y}`).join(' ');
   const areaPath =
-    `M${pts[0][0]},${H} ` +
+    `M${pts[0][0]},${TOP + H} ` +
     pts.map(([x, y]) => `L${x},${y}`).join(' ') +
-    ` L${pts[pts.length - 1][0]},${H} Z`;
+    ` L${pts[pts.length - 1][0]},${TOP + H} Z`;
 
   const yTicks = [1, 0.75, 0.5, 0.25, 0];
   const yLabel = (v: number) => {
@@ -151,10 +152,10 @@ function DailyTrendChart({
   };
 
   return (
-    <svg viewBox={`0 0 ${W} ${H + 24}`} className="w-full" preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${W} ${TOP + H + 24}`} className="w-full" preserveAspectRatio="none">
       {/* Horizontal grid + y-axis labels */}
       {yTicks.map((f) => {
-        const y = H - f * H;
+        const y = TOP + (H - f * H);
         const val = maxVal * f;
         return (
           <g key={f}>
@@ -173,7 +174,7 @@ function DailyTrendChart({
           x={toX(i)}
           y={toY(values[i])}
           width={barW}
-          height={H - toY(values[i])}
+            height={TOP + H - toY(values[i])}
           fill="#818cf8"
           rx={2}
           opacity={0.42}
@@ -193,7 +194,7 @@ function DailyTrendChart({
           <text
             key={d.date}
             x={toX(i) + barW / 2}
-            y={H + 16}
+            y={TOP + H + 16}
             fontSize={9}
             fill="#9ca3af"
             textAnchor="middle"

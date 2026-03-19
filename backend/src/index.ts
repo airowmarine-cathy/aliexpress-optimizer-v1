@@ -295,6 +295,126 @@ async function main() {
     return res.json({ ok: true });
   });
 
+  // User task runs (for homepage task list and resume)
+  app.post("/api/tasks", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
+    const bodySchema = z.object({
+      filename: z.string().min(1).max(300).optional(),
+      totalItems: z.coerce.number().int().min(0).max(200000).default(0),
+      status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).default("queued"),
+      payload: z.record(z.string(), z.any()).optional()
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const { filename, totalItems, status, payload } = parsed.data;
+    const jobInsert = await pool.query(
+      `insert into jobs (owner_user_id, status, filename, total_items)
+       values ($1,$2,$3,$4)
+       returning id`,
+      [req.user!.id, status, filename ?? "", totalItems]
+    );
+    const jobId = jobInsert.rows[0]?.id as string;
+
+    const row = await pool.query(
+      `insert into task_runs (owner_user_id, job_id, filename, status, total_items, payload)
+       values ($1,$2,$3,$4,$5,$6)
+       returning id, owner_user_id, job_id, filename, status, total_items, completed_items, failed_items, payload, created_at, updated_at`,
+      [req.user!.id, jobId, filename ?? "", status, totalItems, payload ?? {}]
+    );
+    return res.status(201).json({ task: row.rows[0] });
+  }));
+
+  app.get("/api/tasks/list", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
+    const querySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(200).default(30)
+    });
+    const parsed = querySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const rows = await pool.query(
+      `select id, owner_user_id, job_id, filename, status, total_items, completed_items, failed_items, payload, created_at, updated_at
+       from task_runs
+       where owner_user_id = $1
+       order by created_at desc
+       limit $2`,
+      [req.user!.id, parsed.data.limit]
+    );
+    return res.json({ tasks: rows.rows });
+  }));
+
+  app.get("/api/tasks/:taskId", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
+    const paramsSchema = z.object({ taskId: z.string().uuid() });
+    const params = paramsSchema.safeParse(req.params);
+    if (!params.success) return res.status(400).json({ error: "Bad request" });
+
+    const row = await pool.query(
+      `select id, owner_user_id, job_id, filename, status, total_items, completed_items, failed_items, payload, created_at, updated_at
+       from task_runs
+       where id = $1`,
+      [params.data.taskId]
+    );
+    const task = row.rows[0];
+    if (!task) return res.status(404).json({ error: "Not found" });
+    const isOwner = task.owner_user_id === req.user!.id;
+    if (!isOwner && req.user!.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+    return res.json({ task });
+  }));
+
+  app.patch("/api/tasks/:taskId", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
+    const paramsSchema = z.object({ taskId: z.string().uuid() });
+    const bodySchema = z.object({
+      status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional(),
+      completedItems: z.coerce.number().int().min(0).max(200000).optional(),
+      failedItems: z.coerce.number().int().min(0).max(200000).optional(),
+      payload: z.record(z.string(), z.any()).optional()
+    });
+    const params = paramsSchema.safeParse(req.params);
+    const body = bodySchema.safeParse(req.body);
+    if (!params.success || !body.success) return res.status(400).json({ error: "Bad request" });
+
+    const exists = await pool.query(
+      `select id, owner_user_id, job_id, total_items from task_runs where id=$1`,
+      [params.data.taskId]
+    );
+    const task = exists.rows[0];
+    if (!task) return res.status(404).json({ error: "Not found" });
+    if (task.owner_user_id !== req.user!.id && req.user!.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const patch = body.data;
+    const updated = await pool.query(
+      `update task_runs
+       set status = coalesce($1, status),
+           completed_items = coalesce($2, completed_items),
+           failed_items = coalesce($3, failed_items),
+           payload = case when $4::jsonb is null then payload else payload || $4::jsonb end,
+           updated_at = now()
+       where id = $5
+       returning id, owner_user_id, job_id, filename, status, total_items, completed_items, failed_items, payload, created_at, updated_at`,
+      [
+        patch.status ?? null,
+        patch.completedItems ?? null,
+        patch.failedItems ?? null,
+        patch.payload ? JSON.stringify(patch.payload) : null,
+        params.data.taskId
+      ]
+    );
+    const updatedTask = updated.rows[0];
+
+    if (updatedTask?.job_id) {
+      await pool.query(
+        `update jobs
+         set status = $1,
+             total_items = $2,
+             updated_at = now()
+         where id = $3`,
+        [updatedTask.status, updatedTask.total_items, updatedTask.job_id]
+      );
+    }
+    return res.json({ task: updatedTask });
+  }));
+
   app.get("/api/admin/usage/summary", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const querySchema = z.object({
       days: z.coerce.number().int().min(1).max(365).default(30),

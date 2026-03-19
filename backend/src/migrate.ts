@@ -3,7 +3,8 @@ import { join } from "node:path";
 import type { Pool } from "pg";
 
 const MIGRATIONS: { id: string; filename: string }[] = [
-  { id: "001_init", filename: "001_init.sql" }
+  { id: "001_init", filename: "001_init.sql" },
+  { id: "002_task_runs", filename: "002_task_runs.sql" }
 ];
 
 export async function runMigrations(pool: Pool) {

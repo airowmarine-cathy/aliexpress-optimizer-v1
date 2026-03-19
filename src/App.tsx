@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, CheckCircle, AlertCircle, Loader2, FileSpreadsheet, Image as ImageIcon, Download, ChevronDown, ChevronUp, Sparkles, LayoutDashboard, Play, Pause, FileOutput, AlertTriangle, CheckCircle2, ChevronRight, X, Check, RefreshCw, Edit2, Save, Plus, Trash2, RefreshCcw, Search } from 'lucide-react';
 import { saveAs } from 'file-saver';
@@ -10,7 +10,7 @@ import { cleanDescriptions, type CleanedDescriptions } from './services/descript
 import { remasterImage, type RemasteredImage } from './services/imageService';
 import { type ProductImageCheckReport, extractImagesFromHtml, checkImageRisk } from './services/imageCheckService';
 import { Login } from './auth/Login';
-import { auditClientEvent, clearToken, me, type User } from './auth/api';
+import { auditClientEvent, clearToken, me, taskCreate, taskList, taskUpdate, type User } from './auth/api';
 import { AdminPanel } from './auth/AdminPanel';
 
 // --- Utility Functions ---
@@ -263,6 +263,44 @@ const getProxiedImageUrl = (url: string) => {
   return absoluteUrl;
 };
 
+function SmartImage({
+  src,
+  alt,
+  className,
+  referrerPolicy = 'no-referrer'
+}: {
+  src: string;
+  alt?: string;
+  className?: string;
+  referrerPolicy?: React.HTMLAttributeReferrerPolicy;
+}) {
+  const candidates = useMemo(() => {
+    const normalized = getProxiedImageUrl(src);
+    if (!normalized) return [];
+    if (normalized.startsWith('data:')) return [normalized];
+    return [normalized, `/api/fetch-image?url=${encodeURIComponent(normalized)}`];
+  }, [src]);
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    setIdx(0);
+  }, [src]);
+
+  if (!candidates.length) return null;
+  const current = candidates[Math.min(idx, candidates.length - 1)];
+  return (
+    <img
+      src={current}
+      alt={alt || ''}
+      className={className}
+      referrerPolicy={referrerPolicy}
+      onError={() => {
+        setIdx((n) => (n < candidates.length - 1 ? n + 1 : n));
+      }}
+    />
+  );
+}
+
 // --- Types ---
 
 type StepStatus = 'idle' | 'processing' | 'success' | 'warning' | 'error';
@@ -286,6 +324,17 @@ interface ProductPipeline {
   description: StepResult<CleanedDescriptions> & { originalData?: CleanedDescriptions };
   compliance: StepResult<ProductImageCheckReport>;
   remaster: StepResult<RemasteredImage & { imgbbUrl?: string }>;
+}
+
+interface TaskRunSummary {
+  id: string;
+  filename: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  total_items: number;
+  completed_items: number;
+  failed_items: number;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Main Component ---
@@ -319,6 +368,59 @@ export default function App() {
   const [uploadMessage, setUploadMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [pageMode, setPageMode] = useState<'home' | 'taskList' | 'workspace'>('home');
+  const [taskRuns, setTaskRuns] = useState<TaskRunSummary[]>([]);
+  const [taskRunsLoading, setTaskRunsLoading] = useState(false);
+  const [taskRunsError, setTaskRunsError] = useState('');
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const snapshotSaveTimer = useRef<number | null>(null);
+
+  const TASK_SNAPSHOT_KEY = 'ali_opt_task_snapshots_v1';
+
+  const saveTaskSnapshotLocal = (taskId: string, data: ProductPipeline[]) => {
+    try {
+      const raw = localStorage.getItem(TASK_SNAPSHOT_KEY);
+      const map = raw ? JSON.parse(raw) : {};
+      map[taskId] = { products: data, updatedAt: Date.now() };
+      localStorage.setItem(TASK_SNAPSHOT_KEY, JSON.stringify(map));
+    } catch (e) {
+      console.warn('save snapshot failed', e);
+    }
+  };
+
+  const loadTaskSnapshotLocal = (taskId: string): ProductPipeline[] | null => {
+    try {
+      const raw = localStorage.getItem(TASK_SNAPSHOT_KEY);
+      const map = raw ? JSON.parse(raw) : {};
+      const snap = map?.[taskId];
+      return Array.isArray(snap?.products) ? snap.products : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const scheduleTaskSnapshotSave = (nextProducts?: ProductPipeline[]) => {
+    if (!currentTaskId) return;
+    if (snapshotSaveTimer.current) {
+      window.clearTimeout(snapshotSaveTimer.current);
+    }
+    snapshotSaveTimer.current = window.setTimeout(() => {
+      saveTaskSnapshotLocal(currentTaskId, nextProducts ?? products);
+    }, 600);
+  };
+
+  const refreshTaskRuns = async () => {
+    setTaskRunsLoading(true);
+    setTaskRunsError('');
+    try {
+      const list = await taskList(50);
+      setTaskRuns(list as TaskRunSummary[]);
+    } catch (e: any) {
+      setTaskRunsError(e?.message || '加载任务列表失败');
+    } finally {
+      setTaskRunsLoading(false);
+    }
+  };
 
   const resetWorkspaceState = () => {
     setProducts([]);
@@ -339,6 +441,8 @@ export default function App() {
     setSyncMessage('');
     setIsSyncing(false);
     setShowAdmin(false);
+    setPageMode('home');
+    setCurrentTaskId(null);
   };
 
   useEffect(() => {
@@ -355,6 +459,12 @@ export default function App() {
     })();
     return () => {
       alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (snapshotSaveTimer.current) window.clearTimeout(snapshotSaveTimer.current);
     };
   }, []);
 
@@ -414,6 +524,7 @@ export default function App() {
         });
 
         setProducts(parsedProducts);
+        setPageMode('workspace');
         setUploadStatus('success');
         setIsSyncing(true);
         setSyncMessage(`正在同步 ${parsedProducts.length} 个产品到云端...`);
@@ -422,6 +533,21 @@ export default function App() {
           itemCount: parsedProducts.length,
           firstSheetName: sheetName
         }).catch((err) => console.warn('audit upload failed', err));
+
+        void (async () => {
+          try {
+            const task = await taskCreate({
+              filename: file.name,
+              totalItems: parsedProducts.length,
+              status: 'queued'
+            });
+            setCurrentTaskId(task.id);
+            saveTaskSnapshotLocal(task.id, parsedProducts);
+            await refreshTaskRuns();
+          } catch (err) {
+            console.warn('create task failed', err);
+          }
+        })();
 
         // 同步数据到 Google Sheets（带重试 + 超时）
         void (async () => {
@@ -461,7 +587,11 @@ export default function App() {
   };
 
   const updateProduct = (id: string, updates: Partial<ProductPipeline>) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    setProducts(prev => {
+      const next = prev.map(p => p.id === id ? { ...p, ...updates } : p);
+      scheduleTaskSnapshotSave(next);
+      return next;
+    });
   };
 
   const syncProductToGoogleSheets = async (product: ProductPipeline) => {
@@ -557,6 +687,21 @@ export default function App() {
     await processProduct(updatedProduct, true);
   };
 
+  const syncTaskProgress = async (status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled') => {
+    if (!currentTaskId) return;
+    const completed = products.filter(p => p.overallStatus === 'completed').length;
+    const failed = products.filter(p => p.overallStatus === 'failed').length;
+    try {
+      await taskUpdate(currentTaskId, {
+        status,
+        completedItems: completed,
+        failedItems: failed
+      });
+    } catch (err) {
+      console.warn('sync task progress failed', err);
+    }
+  };
+
   const processProduct = async (product: ProductPipeline, isManual = false) => {
     updateProduct(product.id, { overallStatus: 'processing' });
 
@@ -582,6 +727,7 @@ export default function App() {
         factSheet: { status: 'error', error: error.message },
         overallStatus: 'failed' 
       });
+      await syncTaskProgress('running');
       return; // Stop processing this product
     }
 
@@ -726,17 +872,20 @@ export default function App() {
     await syncProductToGoogleSheets(updatedProduct);
 
     updateProduct(product.id, { overallStatus: 'completed' });
+    await syncTaskProgress('running');
   };
 
   const togglePipeline = async () => {
     if (isQueueRunning) {
       setIsQueueRunning(false);
       isQueueRunningRef.current = false;
+      await syncTaskProgress('cancelled');
       return;
     }
 
     setIsQueueRunning(true);
     isQueueRunningRef.current = true;
+    await syncTaskProgress('running');
     
     // 提取所有待处理任务
     const idleProducts = products.filter(p => p.overallStatus === 'idle');
@@ -775,6 +924,15 @@ export default function App() {
     if (activeWorkers === 0) {
       setIsQueueRunning(false);
       isQueueRunningRef.current = false;
+      const completed = products.filter(p => p.overallStatus === 'completed').length;
+      const failed = products.filter(p => p.overallStatus === 'failed').length;
+      const total = products.length;
+      const finalStatus =
+        completed + failed >= total
+          ? (failed > 0 ? 'failed' : 'completed')
+          : 'running';
+      await syncTaskProgress(finalStatus);
+      await refreshTaskRuns();
     }
   };
 
@@ -880,6 +1038,15 @@ export default function App() {
             <div className="text-xs font-medium text-slate-500 hidden sm:block">
               当前用户：<span className="text-slate-800">{authUser.username}</span>
             </div>
+            <button
+              onClick={async () => {
+                setPageMode('taskList');
+                await refreshTaskRuns();
+              }}
+              className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm"
+            >
+              任务列表
+            </button>
 
             {authUser.role === 'admin' && (
               <button
@@ -902,7 +1069,7 @@ export default function App() {
             </button>
           </div>
 
-          {products.length > 0 && (
+          {pageMode === 'workspace' && products.length > 0 && (
             <div className="flex items-center gap-4">
               {syncMessage && (
                 <div className={`text-xs font-medium px-3 py-1.5 rounded-full flex items-center gap-2 ${isSyncing ? 'bg-blue-50 text-blue-600' : syncMessage.includes('失败') || syncMessage.includes('异常') ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
@@ -954,7 +1121,69 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {products.length === 0 ? (
+        {pageMode !== 'workspace' ? (
+          pageMode === 'taskList' ? (
+            <div className="max-w-4xl mx-auto">
+              <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-xl font-semibold text-gray-900">任务列表</h2>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => await refreshTaskRuns()}
+                      className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm"
+                    >
+                      刷新
+                    </button>
+                    <button
+                      onClick={() => setPageMode('home')}
+                      className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm"
+                    >
+                      返回上传首页
+                    </button>
+                  </div>
+                </div>
+                {taskRunsError && <div className="text-xs text-red-600 mb-3">{taskRunsError}</div>}
+                {taskRunsLoading ? (
+                  <div className="text-sm text-gray-500 flex items-center gap-2 py-10 justify-center">
+                    <Loader2 className="w-4 h-4 animate-spin" /> 加载中...
+                  </div>
+                ) : taskRuns.length === 0 ? (
+                  <div className="text-sm text-gray-500 py-8 text-center">暂无历史任务</div>
+                ) : (
+                  <div className="space-y-3">
+                    {taskRuns.map((t) => (
+                      <div key={t.id} className="border border-gray-100 rounded-xl p-4 flex items-center justify-between">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-gray-900 truncate">{t.filename || '未命名任务'}</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            创建：{new Date(t.created_at).toLocaleString('zh-CN', { hour12: false })} · 状态：{t.status}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            完成 {t.completed_items}/{t.total_items} · 失败 {t.failed_items}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const snap = loadTaskSnapshotLocal(t.id);
+                            if (snap && snap.length > 0) {
+                              setProducts(snap);
+                              setCurrentTaskId(t.id);
+                              setPageMode('workspace');
+                            } else {
+                              alert('该任务仅有元数据，当前浏览器无可恢复快照。');
+                            }
+                          }}
+                          className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 shadow-sm"
+                        >
+                          打开任务
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
           <div className="max-w-xl mx-auto mt-20">
             <div className="bg-white rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 p-10 text-center transition-all duration-300">
               <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -1057,7 +1286,7 @@ export default function App() {
               </div>
             </div>
           </div>
-        ) : (
+        )) : (
           <div className="space-y-4">
             {products.map(product => (
               <div key={product.id} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.02)] border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
@@ -1078,7 +1307,7 @@ export default function App() {
                     >
                       {product.image ? (
                         <>
-                          <img src={getProxiedImageUrl(product.image)} alt="" className="max-w-full max-h-full object-contain p-1" referrerPolicy="no-referrer" />
+                          <SmartImage src={product.image} alt="" className="max-w-full max-h-full object-contain p-1" />
                           {enableImageRemaster && (
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center text-white backdrop-blur-[2px]">
                               <RefreshCw size={18} className="mb-1" />
@@ -1542,7 +1771,7 @@ export default function App() {
                                     return (
                                     <div key={idx} className="flex flex-col gap-1 w-24">
                                       <div className={`relative w-24 h-24 border rounded-xl overflow-hidden shadow-sm group ${img.isRisky ? 'border-red-500' : 'border-slate-200'}`}>
-                                        <img src={getProxiedImageUrl(img.url)} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                        <SmartImage src={img.url} alt="" className="w-full h-full object-cover" />
                                         
                                         {/* Top-left badge for risky images */}
                                         {img.isRisky && (
@@ -1619,7 +1848,7 @@ export default function App() {
                                     className="flex-1 aspect-square border border-gray-100 rounded-[18px] overflow-hidden bg-[#f5f5f7] shadow-sm p-1 cursor-pointer hover:border-indigo-300 transition-colors"
                                     onClick={() => product.image && setLightboxImage(product.image)}
                                   >
-                                    {product.image && <img src={getProxiedImageUrl(product.image)} alt="Original" className="w-full h-full object-contain rounded-2xl" referrerPolicy="no-referrer" />}
+                                    {product.image && <SmartImage src={product.image} alt="Original" className="w-full h-full object-contain rounded-2xl" />}
                                   </div>
                                   <div className="flex items-center text-gray-300 flex-shrink-0"><ChevronRight size={24} /></div>
                                   <div 
@@ -1627,7 +1856,7 @@ export default function App() {
                                     onClick={() => product.remaster.data && setLightboxImage(product.remaster.data.remasteredUrl)}
                                   >
                                     {product.remaster.data ? (
-                                      <img src={getProxiedImageUrl(product.remaster.data.remasteredUrl)} alt="Remastered" className="w-full h-full object-contain rounded-2xl" />
+                                      <SmartImage src={product.remaster.data.remasteredUrl} alt="Remastered" className="w-full h-full object-contain rounded-2xl" />
                                     ) : (
                                       <div className="w-full h-full flex flex-col items-center justify-center text-indigo-300 gap-2">
                                         {product.remaster.status === 'error' ? (
@@ -1714,7 +1943,7 @@ export default function App() {
                           ${isSelected ? 'border-indigo-500 ring-4 ring-indigo-500/20 shadow-md' : 'border-transparent shadow-sm hover:shadow-md hover:scale-[1.02]'}
                         `}
                       >
-                        <img src={getProxiedImageUrl(img)} alt={`Option ${idx + 1}`} className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
+                        <SmartImage src={img} alt={`Option ${idx + 1}`} className="w-full h-full object-contain p-2" />
                         {isSelected && (
                           <div className="absolute top-2 right-2 bg-indigo-500 text-white rounded-full p-1 shadow-sm">
                             <Check size={14} strokeWidth={3} />
@@ -1736,11 +1965,10 @@ export default function App() {
           className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 cursor-zoom-out"
           onClick={() => setLightboxImage(null)}
         >
-          <img 
-            src={getProxiedImageUrl(lightboxImage)} 
-            alt="Enlarged view" 
-            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
-            referrerPolicy="no-referrer"
+          <SmartImage
+            src={lightboxImage}
+            alt="Enlarged view"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
           />
           <div className="absolute top-6 right-6 text-white/70 hover:text-white bg-black/50 rounded-full p-2 cursor-pointer transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>

@@ -177,3 +177,95 @@ export async function adminTasksList(limit = 100, userId?: string, days?: number
   return data.records;
 }
 
+export async function taskCreate(payload: {
+  filename?: string;
+  totalItems: number;
+  status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  payload?: Record<string, any>;
+}) {
+  const data = await apiFetch<{
+    task: {
+      id: string;
+      owner_user_id: string;
+      job_id: string | null;
+      filename: string;
+      status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+      total_items: number;
+      completed_items: number;
+      failed_items: number;
+      payload: any;
+      created_at: string;
+      updated_at: string;
+    };
+  }>('/api/tasks', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return data.task;
+}
+
+export async function taskList(limit = 30) {
+  const data = await apiFetch<{
+    tasks: Array<{
+      id: string;
+      owner_user_id: string;
+      job_id: string | null;
+      filename: string;
+      status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+      total_items: number;
+      completed_items: number;
+      failed_items: number;
+      payload: any;
+      created_at: string;
+      updated_at: string;
+    }>;
+  }>(`/api/tasks/list?limit=${limit}`);
+  return data.tasks;
+}
+
+export async function taskGet(taskId: string) {
+  const data = await apiFetch<{
+    task: {
+      id: string;
+      owner_user_id: string;
+      job_id: string | null;
+      filename: string;
+      status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+      total_items: number;
+      completed_items: number;
+      failed_items: number;
+      payload: any;
+      created_at: string;
+      updated_at: string;
+    };
+  }>(`/api/tasks/${taskId}`);
+  return data.task;
+}
+
+export async function taskUpdate(taskId: string, payload: {
+  status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  completedItems?: number;
+  failedItems?: number;
+  payload?: Record<string, any>;
+}) {
+  const data = await apiFetch<{
+    task: {
+      id: string;
+      owner_user_id: string;
+      job_id: string | null;
+      filename: string;
+      status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+      total_items: number;
+      completed_items: number;
+      failed_items: number;
+      payload: any;
+      created_at: string;
+      updated_at: string;
+    };
+  }>(`/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+  return data.task;
+}
+
