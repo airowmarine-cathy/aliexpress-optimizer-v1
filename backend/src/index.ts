@@ -166,8 +166,7 @@ async function main() {
 
     const models = [
       "doubao-seed-2-0-mini-260215",
-      "doubao-seed-2-0-lite-260215",
-      "doubao-seed-2-0-pro-260215"
+      "doubao-seed-2-0-lite-260215"
     ];
 
     const { result, attempt } = await runWithModelFallback({
@@ -207,8 +206,7 @@ async function main() {
     const models = [
       "doubao-seed-2-0-mini-260215",
       "deepseek-v3-2-251201",
-      "doubao-seed-2-0-lite-260215",
-      "doubao-seed-2-0-pro-260215"
+      "doubao-seed-2-0-lite-260215"
     ];
 
     const { result, attempt } = await runWithModelFallback({
@@ -337,7 +335,6 @@ async function main() {
 
     const models = [
       "doubao-seed-2-0-lite-260215",
-      "doubao-seed-2-0-pro-260215",
       "doubao-seed-2-0-mini-260215"
     ];
 
