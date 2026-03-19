@@ -1,4 +1,5 @@
 import { FactSheet } from "./factSheetService";
+import { apiFetch } from "../auth/api";
 
 export interface CleanedDescriptions {
   pc1: string;
@@ -133,9 +134,8 @@ async function cleanSingleField(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const res = await fetch('/api/opt/description/clean-field', {
+      const result = await apiFetch<{ cleaned_html: string; changes_made: string[] }>('/api/opt/description/clean-field', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fieldName,
           content,
@@ -143,8 +143,6 @@ async function cleanSingleField(
           dynamicInstructions
         })
       });
-      if (!res.ok) throw new Error(`Clean field failed (${res.status})`);
-      const result = await res.json();
       return {
         cleaned: restoreImages(result.cleaned_html || '', placeholders),
         changes: result.changes_made || []

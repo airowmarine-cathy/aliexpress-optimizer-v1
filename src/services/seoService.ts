@@ -1,4 +1,5 @@
 import { FactSheet } from "./factSheetService";
+import { apiFetch } from "../auth/api";
 
 export interface SEOData {
   optimized_title: string;
@@ -39,11 +40,8 @@ OUTPUT: Include the character count of the optimized title, the core keywords us
 export const SEO_RESPONSE_SCHEMA = {};
 
 export async function optimizeTitle(factSheet: FactSheet, originalTitle: string): Promise<SEOData> {
-  const res = await fetch('/api/opt/seo-title', {
+  return await apiFetch<SEOData>('/api/opt/seo-title', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ factSheet, originalTitle })
   });
-  if (!res.ok) throw new Error(`SEO failed (${res.status})`);
-  return (await res.json()) as SEOData;
 }

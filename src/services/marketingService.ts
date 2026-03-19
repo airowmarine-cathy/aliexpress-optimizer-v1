@@ -1,4 +1,5 @@
 import { FactSheet } from "./factSheetService";
+import { apiFetch } from "../auth/api";
 
 export interface MarketingPoint {
   header: string;
@@ -44,11 +45,8 @@ STRICT RULES:
 export const MARKETING_RESPONSE_SCHEMA = {};
 
 export async function generateMarketingPoints(factSheet: FactSheet): Promise<MarketingData> {
-  const res = await fetch('/api/opt/marketing', {
+  return await apiFetch<MarketingData>('/api/opt/marketing', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ factSheet })
   });
-  if (!res.ok) throw new Error(`Marketing failed (${res.status})`);
-  return (await res.json()) as MarketingData;
 }

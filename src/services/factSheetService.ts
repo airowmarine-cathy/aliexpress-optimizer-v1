@@ -1,3 +1,5 @@
+import { apiFetch } from "../auth/api";
+
 export interface FactSheet {
   material: string;
   dimensions: string;
@@ -62,15 +64,12 @@ export async function extractFactSheet(title: string, customAttributes: any, des
   };
 
   const richDescription = prepareContent(descriptionHtml);
-  const res = await fetch('/api/opt/factsheet', {
+  return await apiFetch<FactSheet>('/api/opt/factsheet', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       title,
       customAttributes,
       descriptionHtml: richDescription
     })
   });
-  if (!res.ok) throw new Error(`FactSheet failed (${res.status})`);
-  return (await res.json()) as FactSheet;
 }

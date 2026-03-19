@@ -1,4 +1,5 @@
 import { FactSheet } from "./factSheetService";
+import { apiFetch } from "../auth/api";
 
 export interface OptimizedAttributes {
   original: string;
@@ -63,11 +64,8 @@ OUTPUT FORMAT:
 export const ATTRIBUTE_SCHEMA = {};
 
 export async function optimizeAttributes(originalAttributes: string, factSheet: FactSheet): Promise<{optimized: string, changes: string[]}> {
-  const res = await fetch('/api/opt/attributes', {
+  return await apiFetch<{ optimized: string; changes: string[] }>('/api/opt/attributes', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ originalAttributes, factSheet })
   });
-  if (!res.ok) throw new Error(`Attributes failed (${res.status})`);
-  return (await res.json()) as { optimized: string; changes: string[] };
 }

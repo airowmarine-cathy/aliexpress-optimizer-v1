@@ -18,7 +18,7 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
