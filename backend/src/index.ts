@@ -26,6 +26,75 @@ async function main() {
 
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
+  // Keep parity with original server.ts image proxy capability.
+  // This endpoint is critical for fetching external images (e.g., 店小秘 links)
+  // from the server side to avoid browser CORS/mixed-content limitations.
+  app.get("/api/fetch-image", async (req, res) => {
+    const url = String(req.query.url || "");
+    if (!url) return res.status(400).send("Missing url parameter");
+
+    const tryFetch = async (u: string) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20_000);
+      try {
+        return await fetch(u, {
+          signal: controller.signal,
+          redirect: "follow",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            Referer: "https://www.dianxiaomi.com/"
+          }
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const candidates = [url];
+    if (url.startsWith("http://")) candidates.push(url.replace(/^http:\/\//i, "https://"));
+    if (url.startsWith("https://")) candidates.push(url.replace(/^https:\/\//i, "http://"));
+
+    let lastStatus = 500;
+    let lastMessage = "Failed to fetch image";
+
+    for (const candidate of candidates) {
+      try {
+        const response = await tryFetch(candidate);
+        lastStatus = response.status;
+        if (!response.ok) {
+          lastMessage = `Upstream status ${response.status}`;
+          continue;
+        }
+
+        const contentType = (response.headers.get("content-type") || "").toLowerCase();
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        // Some upstreams return XML/HTML error pages with 200 status.
+        // Reject non-image payloads so caller can fallback to other links.
+        if (!contentType.startsWith("image/")) {
+          const preview = buffer.toString("utf8", 0, 200).trim();
+          lastStatus = 415;
+          lastMessage = `Unsupported MIME type: ${contentType || "unknown"}; preview=${preview}`;
+          continue;
+        }
+
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.send(buffer);
+      } catch (e: any) {
+        lastStatus = 500;
+        lastMessage = e?.message || "Unknown fetch error";
+      }
+    }
+
+    console.error("[fetch_image_error]", { url, lastStatus, lastMessage });
+    return res.status(lastStatus).send(`Error fetching image: ${lastMessage}`);
+  });
+
   const asyncRoute =
     (fn: (req: any, res: any) => Promise<any>) =>
     (req: any, res: any) => {
