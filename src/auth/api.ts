@@ -86,7 +86,9 @@ export async function auditClientEvent(action: string, details?: Record<string, 
   return data.ok;
 }
 
-export async function adminUsageSummary(days = 30) {
+export async function adminUsageSummary(days = 30, userId?: string) {
+  const params = new URLSearchParams({ days: String(days) });
+  if (userId) params.set('userId', userId);
   return await apiFetch<{
     days: number;
     totals: {
@@ -98,10 +100,12 @@ export async function adminUsageSummary(days = 30) {
     byStep: Array<{ step: string; calls: number; input_tokens: number; output_tokens: number; cost_cny: string | number }>;
     byModel: Array<{ model_id: string; calls: number; input_tokens: number; output_tokens: number; cost_cny: string | number }>;
     byUser: Array<{ owner_user_id: string | null; username: string; calls: number; input_tokens: number; output_tokens: number; cost_cny: string | number }>;
-  }>(`/api/admin/usage/summary?days=${days}`);
+  }>(`/api/admin/usage/summary?${params}`);
 }
 
-export async function adminUsageList(limit = 100) {
+export async function adminUsageList(limit = 100, userId?: string) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (userId) params.set('userId', userId);
   const data = await apiFetch<{
     records: Array<{
       id: string;
@@ -116,7 +120,22 @@ export async function adminUsageList(limit = 100) {
       owner_user_id: string | null;
       username: string;
     }>;
-  }>(`/api/admin/usage/list?limit=${limit}`);
+  }>(`/api/admin/usage/list?${params}`);
+  return data.records;
+}
+
+export async function adminUsageDaily(days = 30, userId?: string) {
+  const params = new URLSearchParams({ days: String(days) });
+  if (userId) params.set('userId', userId);
+  const data = await apiFetch<{
+    records: Array<{
+      date: string;
+      calls: number;
+      input_tokens: number;
+      output_tokens: number;
+      cost_cny: string | number;
+    }>;
+  }>(`/api/admin/usage/daily?${params}`);
   return data.records;
 }
 

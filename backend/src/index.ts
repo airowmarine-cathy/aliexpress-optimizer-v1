@@ -294,14 +294,17 @@ async function main() {
     return res.json({ ok: true });
   });
 
-  app.get("/api/admin/usage/summary", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+  app.get("/api/admin/usage/summary", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const querySchema = z.object({
-      days: z.coerce.number().int().min(1).max(365).default(30)
+      days: z.coerce.number().int().min(1).max(365).default(30),
+      userId: z.string().uuid().optional()
     });
     const parsed = querySchema.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
-    const { days } = parsed.data;
+    const { days, userId } = parsed.data;
+    const params: (string | null)[] = [String(days), userId ?? null];
+
     const totals = await pool.query(
       `select
          count(*)::int as total_calls,
@@ -309,8 +312,9 @@ async function main() {
          coalesce(sum(output_tokens), 0)::int as total_output_tokens,
          coalesce(sum(cost_cny), 0)::numeric as total_cost_cny
        from usage_records
-       where created_at >= now() - ($1::text || ' days')::interval`,
-      [String(days)]
+       where created_at >= now() - ($1::text || ' days')::interval
+         and ($2::uuid is null or owner_user_id = $2::uuid)`,
+      params
     );
 
     const byStep = await pool.query(
@@ -321,9 +325,10 @@ async function main() {
               coalesce(sum(cost_cny), 0)::numeric as cost_cny
        from usage_records
        where created_at >= now() - ($1::text || ' days')::interval
+         and ($2::uuid is null or owner_user_id = $2::uuid)
        group by step
        order by calls desc, step asc`,
-      [String(days)]
+      params
     );
 
     const byModel = await pool.query(
@@ -334,9 +339,10 @@ async function main() {
               coalesce(sum(cost_cny), 0)::numeric as cost_cny
        from usage_records
        where created_at >= now() - ($1::text || ' days')::interval
+         and ($2::uuid is null or owner_user_id = $2::uuid)
        group by model_id
        order by calls desc, model_id asc`,
-      [String(days)]
+      params
     );
 
     const byUser = await pool.query(
@@ -349,9 +355,10 @@ async function main() {
        from usage_records ur
        left join users u on u.id = ur.owner_user_id
        where ur.created_at >= now() - ($1::text || ' days')::interval
+         and ($2::uuid is null or ur.owner_user_id = $2::uuid)
        group by u.username, ur.owner_user_id
        order by calls desc, username asc`,
-      [String(days)]
+      params
     );
 
     return res.json({
@@ -361,15 +368,17 @@ async function main() {
       byModel: byModel.rows,
       byUser: byUser.rows
     });
-  });
+  }));
 
-  app.get("/api/admin/usage/list", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+  app.get("/api/admin/usage/list", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const querySchema = z.object({
-      limit: z.coerce.number().int().min(1).max(500).default(100)
+      limit: z.coerce.number().int().min(1).max(500).default(100),
+      userId: z.string().uuid().optional()
     });
     const parsed = querySchema.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
+    const { limit, userId } = parsed.data;
     const rows = await pool.query(
       `select ur.id,
               ur.created_at,
@@ -384,14 +393,15 @@ async function main() {
               coalesce(u.username, 'unknown') as username
        from usage_records ur
        left join users u on u.id = ur.owner_user_id
+       where ($2::uuid is null or ur.owner_user_id = $2::uuid)
        order by ur.created_at desc
        limit $1`,
-      [parsed.data.limit]
+      [limit, userId ?? null]
     );
     return res.json({ records: rows.rows });
-  });
+  }));
 
-  app.get("/api/admin/audit/list", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+  app.get("/api/admin/audit/list", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const querySchema = z.object({
       limit: z.coerce.number().int().min(1).max(500).default(100)
     });
@@ -412,9 +422,35 @@ async function main() {
       [parsed.data.limit]
     );
     return res.json({ records: rows.rows });
-  });
+  }));
 
-  app.get("/api/admin/tasks/list", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+  app.get("/api/admin/usage/daily", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
+    const querySchema = z.object({
+      days: z.coerce.number().int().min(1).max(365).default(30),
+      userId: z.string().uuid().optional()
+    });
+    const parsed = querySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "Bad request" });
+
+    const { days, userId } = parsed.data;
+    const rows = await pool.query(
+      `select
+         to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as date,
+         count(*)::int as calls,
+         coalesce(sum(input_tokens), 0)::int as input_tokens,
+         coalesce(sum(output_tokens), 0)::int as output_tokens,
+         coalesce(sum(cost_cny), 0)::numeric as cost_cny
+       from usage_records
+       where created_at >= now() - ($1::text || ' days')::interval
+         and ($2::uuid is null or owner_user_id = $2::uuid)
+       group by date_trunc('day', created_at at time zone 'UTC')
+       order by date asc`,
+      [String(days), userId ?? null]
+    );
+    return res.json({ records: rows.rows });
+  }));
+
+  app.get("/api/admin/tasks/list", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const querySchema = z.object({
       limit: z.coerce.number().int().min(1).max(500).default(100)
     });
@@ -462,7 +498,7 @@ async function main() {
       .slice(0, parsed.data.limit);
 
     return res.json({ records });
-  });
+  }));
 
   // --- Optimization (Text Steps) ---
   // These endpoints replace frontend direct model calls.
