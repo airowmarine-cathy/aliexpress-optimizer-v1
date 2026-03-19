@@ -403,11 +403,14 @@ async function main() {
 
   app.get("/api/admin/audit/list", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const querySchema = z.object({
-      limit: z.coerce.number().int().min(1).max(500).default(100)
+      limit: z.coerce.number().int().min(1).max(500).default(100),
+      userId: z.string().uuid().optional(),
+      days: z.coerce.number().int().min(1).max(365).optional()
     });
     const parsed = querySchema.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
+    const { limit, userId, days } = parsed.data;
     const rows = await pool.query(
       `select al.id,
               al.action,
@@ -417,9 +420,11 @@ async function main() {
               coalesce(u.username, 'unknown') as username
        from audit_log al
        left join users u on u.id = al.actor_user_id
+       where ($2::uuid is null or al.actor_user_id = $2::uuid)
+         and ($3::int is null or al.created_at >= now() - ($3::text || ' days')::interval)
        order by al.created_at desc
        limit $1`,
-      [parsed.data.limit]
+      [limit, userId ?? null, days ?? null]
     );
     return res.json({ records: rows.rows });
   }));
@@ -452,11 +457,14 @@ async function main() {
 
   app.get("/api/admin/tasks/list", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const querySchema = z.object({
-      limit: z.coerce.number().int().min(1).max(500).default(100)
+      limit: z.coerce.number().int().min(1).max(500).default(100),
+      userId: z.string().uuid().optional(),
+      days: z.coerce.number().int().min(1).max(365).optional()
     });
     const parsed = querySchema.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ error: "Bad request" });
 
+    const { limit, userId, days } = parsed.data;
     const jobRows = await pool.query(
       `select j.id,
               'job' as source,
@@ -466,12 +474,15 @@ async function main() {
               j.created_at,
               j.updated_at,
               j.owner_user_id,
-              coalesce(u.username, 'unknown') as username
+              coalesce(u.username, 'unknown') as username,
+              null::jsonb as details
        from jobs j
        left join users u on u.id = j.owner_user_id
+       where ($2::uuid is null or j.owner_user_id = $2::uuid)
+         and ($3::int is null or j.created_at >= now() - ($3::text || ' days')::interval)
        order by j.created_at desc
        limit $1`,
-      [parsed.data.limit]
+      [limit, userId ?? null, days ?? null]
     );
 
     const eventRows = await pool.query(
@@ -488,14 +499,16 @@ async function main() {
        from audit_log al
        left join users u on u.id = al.actor_user_id
        where al.action in ('products.upload', 'products.export')
+         and ($2::uuid is null or al.actor_user_id = $2::uuid)
+         and ($3::int is null or al.created_at >= now() - ($3::text || ' days')::interval)
        order by al.created_at desc
        limit $1`,
-      [parsed.data.limit]
+      [limit, userId ?? null, days ?? null]
     );
 
     const records = [...eventRows.rows, ...jobRows.rows]
       .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .slice(0, parsed.data.limit);
+      .slice(0, limit);
 
     return res.json({ records });
   }));

@@ -139,7 +139,10 @@ export async function adminUsageDaily(days = 30, userId?: string) {
   return data.records;
 }
 
-export async function adminAuditList(limit = 100) {
+export async function adminAuditList(limit = 100, userId?: string, days?: number) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (userId) params.set('userId', userId);
+  if (days) params.set('days', String(days));
   const data = await apiFetch<{
     records: Array<{
       id: string;
@@ -149,11 +152,14 @@ export async function adminAuditList(limit = 100) {
       actor_user_id: string | null;
       username: string;
     }>;
-  }>(`/api/admin/audit/list?limit=${limit}`);
+  }>(`/api/admin/audit/list?${params}`);
   return data.records;
 }
 
-export async function adminTasksList(limit = 100) {
+export async function adminTasksList(limit = 100, userId?: string, days?: number) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (userId) params.set('userId', userId);
+  if (days) params.set('days', String(days));
   const data = await apiFetch<{
     records: Array<{
       id: string;
@@ -167,7 +173,7 @@ export async function adminTasksList(limit = 100) {
       username: string;
       details?: any;
     }>;
-  }>(`/api/admin/tasks/list?limit=${limit}`);
+  }>(`/api/admin/tasks/list?${params}`);
   return data.records;
 }
 
