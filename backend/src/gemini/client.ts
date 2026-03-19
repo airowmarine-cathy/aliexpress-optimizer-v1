@@ -16,6 +16,7 @@ export async function runGeminiWithFallback<T>(args: {
   models: string[];
   systemInstruction: string;
   userContent: string;
+  responseSchema?: any;
   validate: (obj: any) => T;
 }): Promise<{ result: T; attempt: GeminiAttempt }> {
   let lastErr: any = null;
@@ -26,7 +27,8 @@ export async function runGeminiWithFallback<T>(args: {
         contents: [{ text: args.userContent }],
         config: {
           systemInstruction: args.systemInstruction,
-          responseMimeType: "application/json"
+          responseMimeType: "application/json",
+          responseSchema: args.responseSchema
         }
       });
       const text = String(res.text || "").replace(/```json\s*|\s*```/g, "").trim();

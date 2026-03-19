@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { Type } from "@google/genai";
 import { z } from "zod";
 import { createPool } from "./db.js";
 import { ensureAdminBootstrap, requireAdmin, requireAuth, signToken, verifyPassword, hashPassword, type AuthedRequest } from "./auth.js";
@@ -58,6 +59,61 @@ async function main() {
   const normalizeCategory = (v: any) => {
     const s = String(v ?? "");
     return ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"].includes(s) ? s : "Industrial";
+  };
+
+  const FACT_SHEET_RESPONSE_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      material: { type: Type.STRING },
+      dimensions: { type: Type.STRING },
+      technical_specs: { type: Type.OBJECT, additionalProperties: { type: Type.STRING } },
+      certifications: { type: Type.ARRAY, items: { type: Type.STRING } },
+      suggested_keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+      category_matrix: { type: Type.STRING, enum: ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"] },
+      compatibility: { type: Type.ARRAY, items: { type: Type.STRING } }
+    },
+    required: ["material", "dimensions", "technical_specs", "certifications", "suggested_keywords", "category_matrix", "compatibility"]
+  };
+  const SEO_RESPONSE_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      optimized_title: { type: Type.STRING },
+      character_count: { type: Type.INTEGER },
+      core_keywords_embedded: { type: Type.ARRAY, items: { type: Type.STRING } },
+      modification_reasons: { type: Type.STRING }
+    },
+    required: ["optimized_title", "character_count", "core_keywords_embedded", "modification_reasons"]
+  };
+  const MARKETING_RESPONSE_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      category_matrix: { type: Type.STRING, enum: ["Industrial", "Productivity", "Home", "Fashion", "Outdoor"] },
+      points: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: { header: { type: Type.STRING }, content: { type: Type.STRING } },
+          required: ["header", "content"]
+        }
+      }
+    },
+    required: ["category_matrix", "points"]
+  };
+  const ATTRIBUTE_RESPONSE_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      optimized_string: { type: Type.STRING },
+      changes_made: { type: Type.ARRAY, items: { type: Type.STRING } }
+    },
+    required: ["optimized_string", "changes_made"]
+  };
+  const DESCRIPTION_RESPONSE_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      cleaned_html: { type: Type.STRING },
+      changes_made: { type: Type.ARRAY, items: { type: Type.STRING } }
+    },
+    required: ["cleaned_html", "changes_made"]
   };
 
   // Login with username/password.
@@ -195,7 +251,23 @@ async function main() {
     const { result, attempt } = await runGeminiWithFallback({
       models,
       systemInstruction: FACT_SHEET_PROMPT_SYSTEM,
-      userContent: `Original Title: ${title}\n\nCustom Attributes: ${attributesStr}\n\nDescription HTML:\n${descriptionHtml}\n\nReturn JSON only.`,
+      userContent: `你是一个专业的产品数据专家。请从以下三个维度深度解析并提取产品事实清单（Fact Sheet）：
+        
+1. 原始标题 (Original Title): ${title}
+2. 自定义属性 (Custom Attributes): ${attributesStr}
+3. 产品详细描述 (Description HTML): 
+${descriptionHtml}
+
+【核心路径（Primary）】：
+利用 Gemini 3.1 Pro 的长文本理解能力，深度解析“产品详细描述 (HTML)”和“原始标题”。
+从复杂的 HTML 标签（尤其是 <table>, <ul>, <ol>）中剥离出材质、规格、技术参数等硬核数据。
+
+【提取规则】：
+- 优先级：自定义属性 > 详细描述中的表格/列表 > 原始标题。
+- 目标：提取材质 (Material)、规格尺寸 (Dimensions)、技术参数 (Technical Specs)、认证信息 (Certifications)。
+- 排除：品牌名、型号、营销话术、保修/售后信息。
+- 语言：所有输出必须使用专业、地道的电商英文。`,
+      responseSchema: FACT_SHEET_RESPONSE_SCHEMA,
       validate: (obj) => factSheetSchema.parse(obj)
     });
 
@@ -226,6 +298,7 @@ async function main() {
       models,
       systemInstruction: SEO_PROMPT_SYSTEM,
       userContent: `Original Title: ${parsed.data.originalTitle}\n\nFact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.`,
+      responseSchema: SEO_RESPONSE_SCHEMA,
       validate: (obj) => {
         const parsedObj = seoSchema.parse(obj);
         const len = parsedObj.optimized_title?.length ?? 0;
@@ -259,6 +332,7 @@ async function main() {
       models,
       systemInstruction: MARKETING_PROMPT_SYSTEM,
       userContent: `Fact Sheet: ${JSON.stringify(parsed.data.factSheet)}\n\nReturn JSON only.`,
+      responseSchema: MARKETING_RESPONSE_SCHEMA,
       validate: (obj) => {
         const m = marketingSchema.parse(obj);
         if (m.points.length < 3 || m.points.length > 5) throw new Error("Marketing points must be 3-5");
@@ -293,6 +367,7 @@ async function main() {
       models,
       systemInstruction: ATTRIBUTE_PROMPT_SYSTEM,
       userContent: `Original Attributes: ${parsed.data.originalAttributes}\n\nFact Sheet Data: ${JSON.stringify(parsed.data.factSheet, null, 2)}\n\nReturn JSON only.`,
+      responseSchema: ATTRIBUTE_RESPONSE_SCHEMA,
       validate: (obj) => attributesSchema.parse(obj)
     });
 
@@ -331,6 +406,7 @@ async function main() {
       models,
       systemInstruction: DESCRIPTION_PROMPT_SYSTEM,
       userContent: `Task: Clean the following ${parsed.data.fieldName} HTML content.\n\nFact Sheet Data:\n${JSON.stringify(parsed.data.factSheet, null, 2)}\n${dyn}\nContent:\n${parsed.data.content}\n\nReturn JSON only.`,
+      responseSchema: DESCRIPTION_RESPONSE_SCHEMA,
       validate: (obj) => descriptionCleanFieldSchema.parse(obj)
     });
 
