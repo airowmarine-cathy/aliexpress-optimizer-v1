@@ -18,20 +18,13 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit, timeoutMs = 10000): Promise<T> {
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let res: Response;
-  try {
-    res = await fetch(path, { ...init, headers, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetch(path, { ...init, headers });
   const text = await res.text();
   let data: any = null;
   if (text) {
