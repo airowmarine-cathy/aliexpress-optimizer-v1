@@ -274,43 +274,14 @@ function SmartImage({
   className?: string;
   referrerPolicy?: React.HTMLAttributeReferrerPolicy;
 }) {
-  const candidates = useMemo(() => {
-    const normalized = getProxiedImageUrl(src);
-    if (!normalized) return [];
-    if (normalized.startsWith('data:')) return [normalized];
-    return [normalized, `/api/fetch-image?url=${encodeURIComponent(normalized)}`];
-  }, [src]);
-  const [idx, setIdx] = useState(0);
-  const [allFailed, setAllFailed] = useState(false);
-
-  useEffect(() => {
-    setIdx(0);
-    setAllFailed(false);
-  }, [src]);
-
-  if (!candidates.length || allFailed) {
-    return (
-      <div className={`flex items-center justify-center bg-gray-100 text-gray-400 ${className || ''}`}>
-        <ImageIcon size={20} />
-      </div>
-    );
-  }
-
-  const current = candidates[idx];
+  const normalized = getProxiedImageUrl(src);
+  if (!normalized) return null;
   return (
     <img
-      key={current}
-      src={current}
+      src={normalized}
       alt={alt || ''}
       className={className}
       referrerPolicy={referrerPolicy}
-      onError={() => {
-        if (idx < candidates.length - 1) {
-          setIdx(idx + 1);
-        } else {
-          setAllFailed(true);
-        }
-      }}
     />
   );
 }
