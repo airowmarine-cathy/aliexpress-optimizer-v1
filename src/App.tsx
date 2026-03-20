@@ -281,21 +281,35 @@ function SmartImage({
     return [normalized, `/api/fetch-image?url=${encodeURIComponent(normalized)}`];
   }, [src]);
   const [idx, setIdx] = useState(0);
+  const [allFailed, setAllFailed] = useState(false);
 
   useEffect(() => {
     setIdx(0);
+    setAllFailed(false);
   }, [src]);
 
-  if (!candidates.length) return null;
-  const current = candidates[Math.min(idx, candidates.length - 1)];
+  if (!candidates.length || allFailed) {
+    return (
+      <div className={`flex items-center justify-center bg-gray-100 text-gray-400 ${className || ''}`}>
+        <ImageIcon size={20} />
+      </div>
+    );
+  }
+
+  const current = candidates[idx];
   return (
     <img
+      key={current}
       src={current}
       alt={alt || ''}
       className={className}
       referrerPolicy={referrerPolicy}
       onError={() => {
-        setIdx((n) => (n < candidates.length - 1 ? n + 1 : n));
+        if (idx < candidates.length - 1) {
+          setIdx(idx + 1);
+        } else {
+          setAllFailed(true);
+        }
       }}
     />
   );
@@ -379,9 +393,23 @@ export default function App() {
 
   const saveTaskSnapshotLocal = (taskId: string, data: ProductPipeline[]) => {
     try {
+      // Strip large rawRow fields (HTML descriptions) before saving to avoid localStorage quota issues
+      const stripped = data.map(p => ({
+        ...p,
+        rawRow: Object.fromEntries(
+          Object.entries(p.rawRow || {}).filter(([k]) =>
+            !k.includes('描述') && !k.includes('description') && !k.includes('Description')
+          )
+        )
+      }));
       const raw = localStorage.getItem(TASK_SNAPSHOT_KEY);
       const map = raw ? JSON.parse(raw) : {};
-      map[taskId] = { products: data, updatedAt: Date.now() };
+      // Only keep last 20 task snapshots to prevent unbounded growth
+      const keys = Object.keys(map);
+      if (keys.length >= 20 && !map[taskId]) {
+        delete map[keys[0]];
+      }
+      map[taskId] = { products: stripped, updatedAt: Date.now() };
       localStorage.setItem(TASK_SNAPSHOT_KEY, JSON.stringify(map));
     } catch (e) {
       console.warn('save snapshot failed', e);
@@ -727,7 +755,6 @@ export default function App() {
         factSheet: { status: 'error', error: error.message },
         overallStatus: 'failed' 
       });
-      await syncTaskProgress('running');
       return; // Stop processing this product
     }
 
@@ -872,7 +899,6 @@ export default function App() {
     await syncProductToGoogleSheets(updatedProduct);
 
     updateProduct(product.id, { overallStatus: 'completed' });
-    await syncTaskProgress('running');
   };
 
   const togglePipeline = async () => {
