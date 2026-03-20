@@ -615,11 +615,7 @@ export default function App() {
   };
 
   const updateProduct = (id: string, updates: Partial<ProductPipeline>) => {
-    setProducts(prev => {
-      const next = prev.map(p => p.id === id ? { ...p, ...updates } : p);
-      scheduleTaskSnapshotSave(next);
-      return next;
-    });
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   };
 
   const syncProductToGoogleSheets = async (product: ProductPipeline) => {
@@ -896,7 +892,9 @@ export default function App() {
       description: { status: 'success' as StepStatus, data: descData, originalData: originalDescData },
       remaster: { status: 'success' as StepStatus, data: finalRemasterData }
     };
-    await syncProductToGoogleSheets(updatedProduct);
+    // Sheets sync is fire-and-forget: product is marked complete immediately,
+    // sync runs in background so it never blocks the optimization pipeline.
+    void syncProductToGoogleSheets(updatedProduct);
 
     updateProduct(product.id, { overallStatus: 'completed' });
   };
@@ -905,13 +903,13 @@ export default function App() {
     if (isQueueRunning) {
       setIsQueueRunning(false);
       isQueueRunningRef.current = false;
-      await syncTaskProgress('cancelled');
+      void syncTaskProgress('cancelled');
       return;
     }
 
     setIsQueueRunning(true);
     isQueueRunningRef.current = true;
-    await syncTaskProgress('running');
+    void syncTaskProgress('running'); // fire-and-forget: must not block worker startup
     
     // 提取所有待处理任务
     const idleProducts = products.filter(p => p.overallStatus === 'idle');
@@ -950,15 +948,21 @@ export default function App() {
     if (activeWorkers === 0) {
       setIsQueueRunning(false);
       isQueueRunningRef.current = false;
-      const completed = products.filter(p => p.overallStatus === 'completed').length;
-      const failed = products.filter(p => p.overallStatus === 'failed').length;
-      const total = products.length;
-      const finalStatus =
-        completed + failed >= total
-          ? (failed > 0 ? 'failed' : 'completed')
-          : 'running';
-      await syncTaskProgress(finalStatus);
-      await refreshTaskRuns();
+      // Use functional updater to get current products state (avoid stale closure)
+      setProducts(current => {
+        const completed = current.filter(p => p.overallStatus === 'completed').length;
+        const failed = current.filter(p => p.overallStatus === 'failed').length;
+        const total = current.length;
+        const finalStatus =
+          completed + failed >= total
+            ? (failed > 0 ? 'failed' : 'completed')
+            : 'running';
+        void syncTaskProgress(finalStatus);
+        // Save final snapshot only once when pipeline completes
+        if (currentTaskId) saveTaskSnapshotLocal(currentTaskId, current);
+        return current;
+      });
+      void refreshTaskRuns();
     }
   };
 

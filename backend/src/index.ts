@@ -187,7 +187,7 @@ async function main() {
   };
 
   // Login with username/password.
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", asyncRoute(async (req, res) => {
     const bodySchema = z.object({
       username: z.string().min(1),
       password: z.string().min(1)
@@ -212,15 +212,15 @@ async function main() {
       [row.id, { username: row.username }]
     );
     return res.json({ token, user: { id: row.id, username: row.username, role: row.role } });
-  });
+  }));
 
   // Who am I
-  app.get("/api/auth/me", requireAuth, async (req: AuthedRequest, res) => {
+  app.get("/api/auth/me", requireAuth, (req: AuthedRequest, res) => {
     return res.json({ user: req.user });
   });
 
   // Admin: create user
-  app.post("/api/admin/users", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+  app.post("/api/admin/users", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const bodySchema = z.object({
       username: z.string().min(1).max(64),
       password: z.string().min(10).max(128),
@@ -248,18 +248,18 @@ async function main() {
       }
       return res.status(500).json({ error: "Server error" });
     }
-  });
+  }));
 
   // Admin: list users
-  app.get("/api/admin/users", requireAuth, requireAdmin, async (_req: AuthedRequest, res) => {
+  app.get("/api/admin/users", requireAuth, requireAdmin, asyncRoute(async (_req: AuthedRequest, res) => {
     const users = await pool.query(
       `select id, username, role, created_at, updated_at from users order by created_at desc`
     );
     return res.json({ users: users.rows });
-  });
+  }));
 
   // Admin: reset password
-  app.post("/api/admin/users/:userId/reset-password", requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+  app.post("/api/admin/users/:userId/reset-password", requireAuth, requireAdmin, asyncRoute(async (req: AuthedRequest, res) => {
     const paramsSchema = z.object({ userId: z.string().uuid() });
     const bodySchema = z.object({ newPassword: z.string().min(10).max(128) });
     const params = paramsSchema.safeParse(req.params);
@@ -277,10 +277,10 @@ async function main() {
       [req.user!.id, { userId: params.data.userId }]
     );
     return res.json({ ok: true });
-  });
+  }));
 
   // Client-side user actions that should appear in admin audit.
-  app.post("/api/audit/client-event", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/audit/client-event", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
     const bodySchema = z.object({
       action: z.string().min(1).max(80),
       details: z.record(z.string(), z.any()).optional()
@@ -293,7 +293,7 @@ async function main() {
       [req.user!.id, parsed.data.action, parsed.data.details ?? {}]
     );
     return res.json({ ok: true });
-  });
+  }));
 
   // User task runs (for homepage task list and resume)
   app.post("/api/tasks", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
@@ -638,7 +638,9 @@ async function main() {
   // These endpoints replace frontend direct model calls.
   // They also record token usage & estimated cost into DB.
 
-  const recordUsage = async (args: {
+  // recordUsage is intentionally NOT awaited at call sites - it must never block
+  // the optimization response. Logged errors only, no throw.
+  const recordUsage = (args: {
     ownerUserId: string;
     step: string;
     provider?: "gemini" | "ark";
@@ -648,7 +650,7 @@ async function main() {
     costCny?: number | null;
     meta?: any;
   }) => {
-    await pool.query(
+    pool.query(
       `insert into usage_records (owner_user_id, step, provider, model_id, input_tokens, output_tokens, cost_cny, meta)
        values ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
@@ -661,7 +663,7 @@ async function main() {
         args.costCny ?? null,
         args.meta ?? {}
       ]
-    );
+    ).catch(e => console.error("[recordUsage]", e));
   };
 
   app.post("/api/opt/factsheet", requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
@@ -700,7 +702,7 @@ ${descriptionHtml}
       validate: (obj) => factSheetSchema.parse(obj)
     });
 
-    await recordUsage({
+    recordUsage({
       ownerUserId: req.user!.id,
       step: "factSheet",
       modelId: attempt.modelId,
@@ -737,7 +739,7 @@ ${descriptionHtml}
       }
     });
 
-    await recordUsage({
+    recordUsage({
       ownerUserId: req.user!.id,
       step: "seoTitle",
       modelId: attempt.modelId,
@@ -769,7 +771,7 @@ ${descriptionHtml}
       }
     });
 
-    await recordUsage({
+    recordUsage({
       ownerUserId: req.user!.id,
       step: "marketing",
       modelId: attempt.modelId,
@@ -800,7 +802,7 @@ ${descriptionHtml}
       validate: (obj) => attributesSchema.parse(obj)
     });
 
-    await recordUsage({
+    recordUsage({
       ownerUserId: req.user!.id,
       step: "attributes",
       modelId: attempt.modelId,
@@ -839,7 +841,7 @@ ${descriptionHtml}
       validate: (obj) => descriptionCleanFieldSchema.parse(obj)
     });
 
-    await recordUsage({
+    recordUsage({
       ownerUserId: req.user!.id,
       step: "description",
       modelId: attempt.modelId,
